@@ -20,7 +20,21 @@ el("loginForm").addEventListener("submit",async e=>{
 });
 el("disconnect").addEventListener("click",()=>{key="";items=[];selected=null;if(poll)clearInterval(poll);clearMedia();render();el("overlay").classList.remove("hidden")});
 function refreshLoop(){if(poll)clearInterval(poll);poll=setInterval(()=>{if(items.some(x=>["queued","processing"].includes(x.status)))refresh()},3000)}
-async function refresh(){if(!key)return;try{items=(await(await api("/incidents")).json()).items;if(selected){selected=items.find(x=>x.id===selected.id)||selected;showAnalysis(selected)}render()}catch(e){toast("Refresh failed: "+e.message)}}
+async function refresh(){
+ if(!key)return;
+ try{
+   const previousStatus=selected?.status;
+   items=(await(await api("/incidents")).json()).items;
+   if(selected){selected=items.find(x=>x.id===selected.id)||selected;}
+   render();
+   if(selected){
+     showAnalysis(selected);
+     // The upload selected this job before it finished. Populate the actual
+     // evidence preview when processing transitions from queued to ready.
+     if(previousStatus!=="ready"&&selected.status==="ready")await selectIncident(selected,false);
+   }
+ }catch(e){toast("Refresh failed: "+e.message)}
+}
 el("refresh").addEventListener("click",refresh);
 el("newIncident").addEventListener("click",()=>{el("studio").scrollIntoView({behavior:"smooth"});el("video").click()});
 const drop=el("drop"),upload=el("video");
@@ -177,7 +191,14 @@ function showAnalysis(x){
    stateRow("SPEECH TRANSCRIPTION",a.transcription?.status||x.status),
    stateRow("VIOLATION ASSESSMENT",a.violation_assessment?.status||"not_implemented")
  );
- if(a.vehicle_detection?.detections?.length)stages.append(stateRow("VEHICLES IN ONE FRAME",String(a.vehicle_detection.detections.length)));
+ if(a.vehicle_detection?.detections?.length){
+   stages.append(stateRow("SAMPLED-FRAME DETECTIONS (CAPPED AT 250)",
+     String(a.vehicle_detection.detections.length)
+     +(a.vehicle_detection.detections.length>=250?" + (limit)":"")));
+ }
+ if(a.object_tracking?.sampled_frames){
+   stages.append(stateRow("VIDEO FRAMES SAMPLED",String(a.object_tracking.sampled_frames)));
+ }
  const extras = [
   ["QWEN2.5-VL VIDEO ANALYSIS",a.visual_reasoning?.status||"not_configured"],
   ["VEHICLE TRACKING",a.object_tracking?.status||"not_configured"],
@@ -186,17 +207,35 @@ function showAnalysis(x){
   ["TARGET VEHICLE MATCH",a.target_matching?.status||"unavailable"]
  ];
  extras.forEach(pair=>stages.append(stateRow(pair[0],pair[1])));
+ // A completed incident can still contain individually failed AI stages.
+ // Surface the stored error instead of implying every model succeeded.
+ for(const [label,part] of [
+   ["Speech transcription",a.transcription],
+   ["YOLO/BoT-SORT",a.object_tracking],
+   ["Qwen2.5-VL",a.visual_reasoning],
+   ["Egyptian plate OCR",a.plate_recognition]
+ ]){
+   if(part?.status==="failed" || part?.status==="unparseable"){
+     const error=document.createElement("p");
+     error.className="small-center";
+     error.style.textAlign="left";
+     error.style.color="#f6bc96";
+     error.textContent=label+" error: "+(part.note||"Inspect the model runtime logs.");
+     stages.append(error);
+   }
+ }
+
  const summary=a.visual_reasoning?.observations?.scene_summary;
  if(summary){const p=document.createElement("p");p.className="small-center";p.textContent="Qwen visual assessment (UNVERIFIED): "+summary;stages.append(p)}
  if(a.driver_claim?.verbatim){const p=document.createElement("p");p.className="small-center";p.textContent="Driver's claim: "+a.driver_claim.verbatim;stages.append(p)}
  const candidates=a.violation_assessment?.candidates||[];
  for(const candidate of candidates.slice(0,6)){const p=document.createElement("p");p.className="small-center";p.textContent="Review candidate: "+candidate.category.replaceAll("_"," ")+" — "+candidate.visual_evidence+" at "+(candidate.time_seconds??"?")+"s";stages.append(p)}
- if(a.object_tracking?.tracks?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.object_tracking.tracks.length+" provisional vehicle track IDs. Identity not established.";stages.append(p)}
+ if(a.object_tracking?.tracks?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.object_tracking.tracks.length+" provisional tracking IDs across sampled frames. These are NOT necessarily distinct vehicles; IDs can change.";stages.append(p)}
  if(a.plate_recognition?.candidates?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.plate_recognition.candidates.length+" plate OCR candidate readings; none verified.";stages.append(p)}
  if(x.status==="failed"){const note=document.createElement("p");note.className="small-center";note.textContent=x.error||"Processing failed";const retry=document.createElement("button");retry.className="button mini";retry.textContent="Retry analysis ↻";retry.onclick=async()=>{try{await api("/incidents/"+x.id+"/reanalyze",{method:"POST"});toast("Reanalysis queued");await refresh()}catch(e){toast(e.message)}};stages.append(note,retry)}
 }
-async function selectIncident(x){
- if(!x)return;selected=x;showAnalysis(x);clearMedia();el("studio").scrollIntoView({behavior:"smooth"});
+async function selectIncident(x,scroll=true){
+ if(!x)return;selected=x;showAnalysis(x);clearMedia();if(scroll)el("studio").scrollIntoView({behavior:"smooth"});
  if(x.status!=="ready")return;
  try{const res=await api("/incidents/"+x.id+"/thumbnail");if(selected.id!==x.id)return;mediaUrl=URL.createObjectURL(await res.blob());const img=document.createElement("img");img.src=mediaUrl;img.alt="Actual frame extracted from uploaded footage";const chip=document.createElement("div");chip.className="image-chip";chip.textContent="SOURCE FRAME AT "+(Number(x.video?.selection?.start_seconds||0)+Number(x.analysis?.evidence?.keyframe_second||0)).toFixed(1)+"s";el("frame").replaceChildren(img,chip)}catch(e){el("frame").textContent="Preview unavailable: "+e.message}
 }

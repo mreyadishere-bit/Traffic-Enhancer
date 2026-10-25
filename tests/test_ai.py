@@ -47,3 +47,26 @@ def test_unconfigured_models_not_fake(monkeypatch, tmp_path):
     assert track_vehicles(tmp_path/"empty.mp4", {})["status"] == "not_configured"
     assert scan_plates(tmp_path/"empty.mp4", 20)["value"] is None
     assert describe_video(tmp_path/"empty.mp4", 20, {})["status"] == "not_configured"
+
+
+def test_report_shows_real_execution_failures_and_no_fake_vehicle_count():
+    from services.api.report import build_report
+    incident = {
+        "id": "x" * 32, "created_at": "2026-10-25T00:00:00+00:00",
+        "filename": "demo.mp4", "sha256": "f"*64, "duration": 30,
+        "video": {"width": 640, "height": 360, "selection": {
+            "start_seconds": 20, "end_seconds": 50,
+            "source_duration_seconds": 220, "clip_sha256": "a"*64}},
+        "analysis": {
+            "review_status": "unreviewed",
+            "vehicle_detection": {"status": "completed", "detections": [{"label": "car"}]*6},
+            "object_tracking": {"status": "completed", "tracks": [{"track_id": 1}]},
+            "transcription": {"status": "failed", "note": "Mocked model-cache download error", "text": None},
+            "visual_reasoning": {"status": "not_configured", "note": "Model is disabled"},
+            "plate_recognition": {"status": "not_configured", "note": "Specialized weights missing"},
+            "violation_assessment": {"status": "unavailable", "candidates": []},
+        }
+    }
+    output = build_report(incident)
+    assert output.startswith(b"%PDF")
+    assert len(output) > 1800

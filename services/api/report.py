@@ -81,6 +81,16 @@ def build_report(incident, preview_path=None):
     qwen = info.get("visual_reasoning") or {}
     assessment = info.get("violation_assessment") or {}
 
+    section("Executive assessment / incomplete until human review")
+    row("Review state", info.get("review_status", "unreviewed"))
+    row("Vision reasoning", qwen.get("status", "not_configured"))
+    row("Potential event count", len(assessment.get("candidates") or []))
+    row("Tracking IDs", len(track.get("tracks") or []))
+    row("Stored detections", len((info.get("vehicle_detection") or {}).get("detections") or []))
+    paragraph("Frame detections count boxes across multiple sampled frames (capped at 250 in stored output); "
+              "tracking IDs can change and do not prove a unique number of vehicles. "
+              "No official violation is established.")
+
     section("Evidence integrity")
     for label, value in (
         ("Incident ID", incident["id"]),
@@ -124,6 +134,20 @@ def build_report(incident, preview_path=None):
         ("Human review", info.get("review_status")),
     ):
         row(label, value)
+
+    section("Processing errors / unmet prerequisites")
+    errors = 0
+    for name, stage in (
+        ("Speech", speech), ("Tracking", track),
+        ("Qwen2.5-VL", qwen), ("Plate OCR", ocr)
+    ):
+        status = stage.get("status", "unavailable")
+        if status in ("failed", "unparseable", "not_configured"):
+            errors += 1
+            paragraph(name + " (" + status + "): " +
+                      str(stage.get("note") or "Model was not configured or completed."))
+    if not errors:
+        paragraph("No reported model execution failures. Accuracy remains unverified.")
 
     section("Driver-stated description - unverified")
     paragraph(claim.get("verbatim") or "No usable audio description was available.")
