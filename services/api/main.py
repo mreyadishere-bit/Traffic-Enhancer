@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -28,10 +28,62 @@ EVIDENCE = DATA / "evidence"
 DERIVED = DATA / "derived"
 DB = DATA / "traffic.db"
 MAX_BYTES = int(os.environ.get("TE_MAX_UPLOAD_MB", "150")) * 1024 * 1024
+MAX_SOURCE_BYTES = int(os.environ.get("TE_MAX_SOURCE_MB", "512")) * 1024 * 1024
+MAX_SOURCE_SECONDS = int(os.environ.get("TE_MAX_SOURCE_SECONDS", "7200"))
 KEY = os.environ.get("TE_API_KEY", "dev-only-change-me")
 if os.environ.get("TE_ENV", "development") == "production" and KEY == "dev-only-change-me":
     raise RuntimeError("Set a unique TE_API_KEY before using TE_ENV=production")
 
+
+
+def ensure_media_tools():
+    """Use installed FFmpeg first; fetch both binaries into Python cache if missing.
+
+    The optional first-use fetch requires internet. It does not modify Windows
+    global PATH, and respects manually installed ffmpeg/ffprobe.
+    """
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths(weak=True)
+    except Exception as exc:
+        raise HTTPException(503,
+            "FFmpeg setup failed. Ensure internet access for first-use download, "
+            f"or install FFmpeg and FFprobe: {type(exc).__name__}: {str(exc)[:160]}") from exc
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        raise HTTPException(503, "FFmpeg and FFprobe unavailable; retry setup.")
+
+def sha256_file(path):
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+def source_evidence_path(row):
+    suffix = Path(row["filename"]).suffix.lower()
+    source = EVIDENCE / (row["id"] + ".source" + suffix)
+    return source if source.exists() else evidence_path(row)
+
+def trim_evidence(source, output, start, end):
+    """Accurate re-encode, not keyframe-only clipping; preserve source separately."""
+    try:
+        subprocess.run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", str(start), "-i", str(source),
+            "-t", str(round(end-start, 3)),
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
+            "-pix_fmt", "yuv420p", "-c:a", "aac",
+            "-movflags", "+faststart", str(output),
+        ], capture_output=True, check=True, timeout=360)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        raise HTTPException(422, f"Unable to trim video: {type(exc).__name__}") from exc
+    if not output.is_file() or output.stat().st_size == 0:
+        raise HTTPException(422, "Trimmed recording was empty")
+    if output.stat().st_size > MAX_BYTES:
+        raise HTTPException(413, "Selected clip still exceeds 150 MB; choose a shorter segment")
 
 def connect():
     conn = sqlite3.connect(DB, timeout=30)
@@ -122,8 +174,8 @@ def probe(path):
         if not streams:
             raise ValueError("File contains no video stream")
         duration = float(info.get("format", {}).get("duration") or streams[0].get("duration") or 0)
-        if not 1 <= duration <= 180:
-            raise ValueError("Video must be between 1 and 180 seconds")
+        if not 1 <= duration <= MAX_SOURCE_SECONDS:
+            raise ValueError(f"Video must be between 1 and {MAX_SOURCE_SECONDS} seconds")
         rate = streams[0].get("avg_frame_rate") or streams[0].get("r_frame_rate") or "0/1"
         try:
             frame_rate = float(Fraction(rate))
@@ -187,41 +239,89 @@ def health():
 
 
 @app.post("/api/v1/incidents", status_code=202, dependencies=[Depends(authorize)])
-async def upload_incident(background: BackgroundTasks, video: UploadFile = File(...)):
-    if not shutil.which("ffprobe") or not shutil.which("ffmpeg"):
-        raise HTTPException(503, "FFmpeg and ffprobe must be installed")
+async def upload_incident(
+    background: BackgroundTasks, video: UploadFile = File(...),
+    start_seconds: float | None = Form(default=None),
+    end_seconds: float | None = Form(default=None),
+):
+    ensure_media_tools()
     filename = Path(video.filename or "recording.mp4").name[:160]
-    if Path(filename).suffix.lower() not in {".mp4", ".mov", ".mkv"}:
-        raise HTTPException(415, "Supported file extensions: .mp4, .mov, .mkv")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".mp4", ".mov", ".mkv"}:
+        raise HTTPException(415, "Supported extensions: .mp4, .mov, .mkv")
+    if (start_seconds is None) != (end_seconds is None):
+        raise HTTPException(422, "Provide both trim start and end, or neither")
+
     incident_id = uuid.uuid4().hex
-    path = EVIDENCE / (incident_id + Path(filename).suffix.lower())
-    digest = hashlib.sha256()
+    original = EVIDENCE / (incident_id + ".source" + suffix)
+    output = EVIDENCE / (incident_id + ".mp4") if start_seconds is not None else EVIDENCE / (incident_id + suffix)
+    source_digest = hashlib.sha256()
     size = 0
     try:
-        with path.open("wb") as out:
+        with original.open("wb") as out:
             while chunk := await video.read(1024 * 1024):
                 size += len(chunk)
-                if size > MAX_BYTES:
-                    raise HTTPException(413, "Video exceeds configured size limit")
-                digest.update(chunk)
+                if size > MAX_SOURCE_BYTES:
+                    raise HTTPException(413, "Source exceeds server upload cap (512 MB by default)")
+                source_digest.update(chunk)
                 out.write(chunk)
         if size == 0:
             raise HTTPException(422, "Empty video")
-        metadata = probe(path)
+        full_metadata = probe(original)
+        duration = full_metadata["duration_seconds"]
+        trimmed = start_seconds is not None
+        if trimmed:
+            import math
+            if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+                raise HTTPException(422, "Trim bounds must be finite numbers")
+            if start_seconds < 0 or end_seconds <= start_seconds or end_seconds > duration + 0.15:
+                raise HTTPException(422, "Trim bounds must be inside the source recording")
+            if end_seconds - start_seconds < 1 or end_seconds - start_seconds > 180:
+                raise HTTPException(422, "Selected segment must be 1–180 seconds")
+            trim_evidence(original, output, start_seconds, min(duration, end_seconds))
+            metadata = probe(output)
+            if metadata["duration_seconds"] > 180.1:
+                raise HTTPException(422, "Encoded clip exceeds 180 seconds")
+            clip_digest = sha256_file(output)
+            stored_bytes = output.stat().st_size
+        else:
+            if duration > 180:
+                raise HTTPException(422,
+                    "Recording exceeds 180 seconds: preview and select a segment to analyze")
+            if size > MAX_BYTES:
+                raise HTTPException(413, "Clip exceeds 150 MB. Choose a shorter segment")
+            original.replace(output)
+            metadata = full_metadata
+            clip_digest = source_digest.hexdigest()
+            stored_bytes = size
+
+        metadata["selection"] = {
+            "was_trimmed": trimmed,
+            "source_duration_seconds": duration,
+            "start_seconds": round(start_seconds, 3) if trimmed else 0,
+            "end_seconds": round(min(duration, end_seconds), 3) if trimmed else duration,
+            "source_sha256": source_digest.hexdigest(),
+            "clip_sha256": clip_digest,
+            "source_bytes": size, "clip_bytes": stored_bytes,
+        }
         with connect() as db:
             db.execute("""INSERT INTO incidents
-            (id, filename, created_at, sha256, bytes, duration, video_json, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                       (incident_id, filename, datetime.now(timezone.utc).isoformat(),
-                        digest.hexdigest(), size, metadata["duration_seconds"],
-                        json.dumps(metadata), "queued"))
+                (id, filename, created_at, sha256, bytes, duration, video_json, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (incident_id, filename, datetime.now(timezone.utc).isoformat(),
+                 source_digest.hexdigest(), stored_bytes,
+                 metadata["duration_seconds"], json.dumps(metadata), "queued"))
     except Exception:
-        path.unlink(missing_ok=True)
+        original.unlink(missing_ok=True)
+        if output != original:
+            output.unlink(missing_ok=True)
         raise
     finally:
         await video.close()
     background.add_task(analyze_record, incident_id)
-    return {"id": incident_id, "status": "queued", "sha256": digest.hexdigest()}
+    return {"id": incident_id, "status": "queued",
+            "sha256": source_digest.hexdigest(),
+            "clip_sha256": clip_digest, "trimmed": trimmed}
 
 
 @app.get("/api/v1/incidents", dependencies=[Depends(authorize)])
@@ -243,6 +343,14 @@ def get_video(incident_id: str):
                   ".mkv": "video/x-matroska"}.get(Path(row["filename"]).suffix.lower(), "application/octet-stream")
     return FileResponse(evidence_path(row), media_type=media_type,
                         filename=row["filename"])
+
+
+@app.get("/api/v1/incidents/{incident_id}/source", dependencies=[Depends(authorize)])
+def get_original(incident_id: str):
+    """The unaltered uploaded file is accessible to the authenticated operator."""
+    row = read_incident(incident_id)
+    return FileResponse(source_evidence_path(row), filename=row["filename"],
+                        media_type="application/octet-stream")
 
 
 @app.get("/api/v1/incidents/{incident_id}/thumbnail", dependencies=[Depends(authorize)])
