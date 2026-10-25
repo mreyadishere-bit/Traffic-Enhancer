@@ -185,7 +185,7 @@ function clearMedia(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null}c
 function stateRow(label,value){const wrap=document.createElement("div"),a=document.createElement("span"),b=document.createElement("b");a.textContent=label;b.textContent=(value||"no data").replaceAll("_"," ").toUpperCase();if(["not_configured","failed"].includes(value))b.className="warn";else if(value!=="completed")b.className="muted";wrap.append(a,b);return wrap}
 function showAnalysis(x){
  el("selected").textContent=x.id.slice(0,12).toUpperCase()+" / "+x.status.toUpperCase()+" / "+(x.stage||"").replaceAll("_"," ").toUpperCase();
- el("play").disabled=x.status!=="ready";el("pdf").disabled=x.status!=="ready";el("source").disabled=x.status!=="ready";
+ el("play").disabled=x.status!=="ready";el("pdf").disabled=x.status!=="ready";el("source").disabled=x.status!=="ready";el("recheck").disabled=!["ready","failed"].includes(x.status);
  const a=x.analysis||{}, stages=el("stages");stages.replaceChildren(
    stateRow("VEHICLE DETECTION",a.vehicle_detection?.status||x.status),
    stateRow("SPEECH TRANSCRIPTION",a.transcription?.status||x.status),
@@ -247,3 +247,14 @@ async function asset(path,name,videoMode=false){
 el("play").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/video",null,true)};
 el("pdf").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/report.pdf","traffic-report-"+selected.id+".pdf")};
 el("source").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/source",selected.filename)};
+
+el("recheck").onclick=async()=>{
+ if(!selected || !["ready","failed"].includes(selected.status))return;
+ const id=selected.id;
+ el("recheck").disabled=true;
+ try{
+   await api("/incidents/"+id+"/reanalyze",{method:"POST"});
+   toast("Analysis requested using current configured models.");
+   await refresh();
+ }catch(error){toast("Could not restart analysis: "+error.message);el("recheck").disabled=false}
+};
