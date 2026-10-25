@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Traffic Enhancer",
+    "slug": "traffic-enhancer",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.trafficenhancer.prototype"
+    },
+    "android": {
+      "package": "com.trafficenhancer.prototype"
+    },
+    "plugins": [
+      "expo-document-picker"
+    ]
+  }
+}

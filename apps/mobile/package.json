@@ -1,0 +1,25 @@
+{
+  "name": "traffic-enhancer-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "expo": "~58.0.19",
+    "expo-document-picker": "~58.0.4",
+    "expo-file-system": "~58.0.11",
+    "expo-sharing": "~58.0.20",
+    "react": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.9.1"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "@types/react": "~19.3.0"
+  }
+}
