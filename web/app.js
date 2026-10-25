@@ -78,6 +78,21 @@ function showAnalysis(x){
    stateRow("VIOLATION ASSESSMENT",a.violation_assessment?.status||"not_implemented")
  );
  if(a.vehicle_detection?.detections?.length)stages.append(stateRow("VEHICLES IN ONE FRAME",String(a.vehicle_detection.detections.length)));
+ const extras = [
+  ["QWEN2.5-VL VIDEO ANALYSIS",a.visual_reasoning?.status||"not_configured"],
+  ["VEHICLE TRACKING",a.object_tracking?.status||"not_configured"],
+  ["EGYPTIAN PLATE OCR",a.plate_recognition?.status||"not_configured"],
+  ["DRIVER VOICE DESCRIPTION",a.driver_claim?.status||"unavailable"],
+  ["TARGET VEHICLE MATCH",a.target_matching?.status||"unavailable"]
+ ];
+ extras.forEach(pair=>stages.append(stateRow(pair[0],pair[1])));
+ const summary=a.visual_reasoning?.observations?.scene_summary;
+ if(summary){const p=document.createElement("p");p.className="small-center";p.textContent="Qwen visual assessment (UNVERIFIED): "+summary;stages.append(p)}
+ if(a.driver_claim?.verbatim){const p=document.createElement("p");p.className="small-center";p.textContent="Driver's claim: "+a.driver_claim.verbatim;stages.append(p)}
+ const candidates=a.violation_assessment?.candidates||[];
+ for(const candidate of candidates.slice(0,6)){const p=document.createElement("p");p.className="small-center";p.textContent="Review candidate: "+candidate.category.replaceAll("_"," ")+" — "+candidate.visual_evidence+" at "+(candidate.time_seconds??"?")+"s";stages.append(p)}
+ if(a.object_tracking?.tracks?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.object_tracking.tracks.length+" provisional vehicle track IDs. Identity not established.";stages.append(p)}
+ if(a.plate_recognition?.candidates?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.plate_recognition.candidates.length+" plate OCR candidate readings; none verified.";stages.append(p)}
  if(x.status==="failed"){const note=document.createElement("p");note.className="small-center";note.textContent=x.error||"Processing failed";const retry=document.createElement("button");retry.className="button mini";retry.textContent="Retry analysis ↻";retry.onclick=async()=>{try{await api("/incidents/"+x.id+"/reanalyze",{method:"POST"});toast("Reanalysis queued");await refresh()}catch(e){toast(e.message)}};stages.append(note,retry)}
 }
 async function selectIncident(x){
