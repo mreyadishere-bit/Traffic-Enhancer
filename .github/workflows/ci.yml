@@ -1,4 +1,4 @@
-name: Validate API
+name: Validate API and Mobile Source
 on:
   push:
     branches: [main]
@@ -23,3 +23,18 @@ jobs:
         run: python -m compileall -q services tests
       - name: Test real evidence workflow
         run: python -m pytest -q
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate browser script
+        run: node --check web/app.js
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --no-audit --no-fund
+      - name: Typecheck mobile project
+        working-directory: apps/mobile
+        run: npm run typecheck

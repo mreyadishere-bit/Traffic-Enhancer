@@ -4,7 +4,7 @@
 
 An early-stage road evidence platform. The first **runnable web vertical slice** accepts real dashcam videos, checks file integrity, extracts an actual frame using FFmpeg, optionally runs genuine AI models, and produces a preliminary PDF report.
 
-> **Current limitations:** Not an official reporting service. No camera-to-mobile automatic sync, native Android/iOS client, Egyptian plate recognition, vehicle tracking, or traffic-violation verdict has been implemented. No fabricated detections are used. The operator-key login is for local development only.
+> **Current limitations:** Not an official reporting service. No camera-to-mobile automatic sync, real-device-verified mobile release, Egyptian plate recognition, vehicle tracking, or traffic-violation verdict has been implemented. No fabricated detections are used. The operator-key login is for local development only.
 
 ## Start locally
 
@@ -72,7 +72,7 @@ The Compose deployment binds only to **127.0.0.1:18090**. It never uses public p
 | Audio transcription | Implemented with optional faster-whisper model; not benchmarked |
 | Plate OCR / vehicle tracking / automatic violations | Not implemented |
 | Automatic DDPAI import to our app | Unverified; not implemented |
-| Native Android / iPhone apps | Not implemented |
+| Android / iPhone Expo source foundation | Implemented; real-device tests and production integration pending |
 | Full multi-user security / production workflow | Not implemented |
 
-Read [system architecture](docs/ARCHITECTURE.md), [DDPAI feasibility](docs/CAMERA_FEASIBILITY.md), and [planned camera interface](integrations/dashcams/README.md).
+Mobile source: [apps/mobile](apps/mobile/README.md). Read [system architecture](docs/ARCHITECTURE.md), [DDPAI feasibility](docs/CAMERA_FEASIBILITY.md), and [planned camera interface](integrations/dashcams/README.md).
