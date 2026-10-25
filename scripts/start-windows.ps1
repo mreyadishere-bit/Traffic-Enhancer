@@ -50,7 +50,13 @@ Write-Host "Your local URL: http://127.0.0.1:8000"
 # Show actionable dependency errors instead of opening a broken page.
 & $python -c "from services.api.main import app; print('Python imports OK')"
 if ($LASTEXITCODE -ne 0) {
-    throw "Import check failed. Run: .\.venv\Scripts\python.exe -m pip install --no-cache-dir --force-reinstall -r requirements.txt"
+    Write-Warning "Import failed (possibly damaged Pillow or Pydantic files). Automatically repairing core packages..."
+    & $python -m pip install --disable-pip-version-check --no-cache-dir --force-reinstall -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { throw "Automatic dependency repair failed." }
+    & $python -c "from services.api.main import app; print('Python imports OK after repair')"
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Python environment is still broken. Inspect the error above or recreate only .venv."
+    }
 }
 Write-Host "Launching backend and checking readiness..."
 $proc = Start-Process -FilePath $python -ArgumentList @("-m","uvicorn","services.api.main:app","--host","127.0.0.1","--port","8000") -NoNewWindow -PassThru

@@ -171,7 +171,7 @@ function clearMedia(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null}c
 function stateRow(label,value){const wrap=document.createElement("div"),a=document.createElement("span"),b=document.createElement("b");a.textContent=label;b.textContent=(value||"no data").replaceAll("_"," ").toUpperCase();if(["not_configured","failed"].includes(value))b.className="warn";else if(value!=="completed")b.className="muted";wrap.append(a,b);return wrap}
 function showAnalysis(x){
  el("selected").textContent=x.id.slice(0,12).toUpperCase()+" / "+x.status.toUpperCase()+" / "+(x.stage||"").replaceAll("_"," ").toUpperCase();
- el("play").disabled=x.status!=="ready";el("pdf").disabled=x.status!=="ready";
+ el("play").disabled=x.status!=="ready";el("pdf").disabled=x.status!=="ready";el("source").disabled=x.status!=="ready";
  const a=x.analysis||{}, stages=el("stages");stages.replaceChildren(
    stateRow("VEHICLE DETECTION",a.vehicle_detection?.status||x.status),
    stateRow("SPEECH TRANSCRIPTION",a.transcription?.status||x.status),
@@ -198,7 +198,7 @@ function showAnalysis(x){
 async function selectIncident(x){
  if(!x)return;selected=x;showAnalysis(x);clearMedia();el("studio").scrollIntoView({behavior:"smooth"});
  if(x.status!=="ready")return;
- try{const res=await api("/incidents/"+x.id+"/thumbnail");if(selected.id!==x.id)return;mediaUrl=URL.createObjectURL(await res.blob());const img=document.createElement("img");img.src=mediaUrl;img.alt="Actual frame extracted from uploaded footage";const chip=document.createElement("div");chip.className="image-chip";chip.textContent="ORIGINAL FRAME AT "+(x.analysis?.evidence?.keyframe_second??"—")+"s";el("frame").replaceChildren(img,chip)}catch(e){el("frame").textContent="Preview unavailable: "+e.message}
+ try{const res=await api("/incidents/"+x.id+"/thumbnail");if(selected.id!==x.id)return;mediaUrl=URL.createObjectURL(await res.blob());const img=document.createElement("img");img.src=mediaUrl;img.alt="Actual frame extracted from uploaded footage";const chip=document.createElement("div");chip.className="image-chip";chip.textContent="SOURCE FRAME AT "+(Number(x.video?.selection?.start_seconds||0)+Number(x.analysis?.evidence?.keyframe_second||0)).toFixed(1)+"s";el("frame").replaceChildren(img,chip)}catch(e){el("frame").textContent="Preview unavailable: "+e.message}
 }
 async function asset(path,name,videoMode=false){
  if(!selected)return;
@@ -207,3 +207,4 @@ async function asset(path,name,videoMode=false){
 }
 el("play").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/video",null,true)};
 el("pdf").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/report.pdf","traffic-report-"+selected.id+".pdf")};
+el("source").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/source",selected.filename)};
