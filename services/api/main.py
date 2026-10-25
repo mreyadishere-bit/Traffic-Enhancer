@@ -234,7 +234,7 @@ def get_report_pdf(incident_id: str):
     row = read_incident(incident_id)
     if row["status"] != "ready":
         raise HTTPException(409, "Report not ready")
-    return Response(content=build_report(public_incident(row)),
+    return Response(content=build_report(public_incident(row), DERIVED / (incident_id + ".jpg")),
                     media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="traffic-report-{incident_id}.pdf"'})
 

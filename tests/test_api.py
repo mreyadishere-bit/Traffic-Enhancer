@@ -69,4 +69,5 @@ def test_real_video_pipeline_and_pdf(client, tmp_path):
     assert client.get(f"/api/v1/incidents/{incident_id}/report", headers=headers()).status_code == 200
     pdf = client.get(f"/api/v1/incidents/{incident_id}/report.pdf", headers=headers())
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    assert len(pdf.content) > 1500  # includes original extracted frame as an image
     assert client.get(f"/api/v1/incidents/{incident_id}/report.pdf").status_code == 401

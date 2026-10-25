@@ -9,9 +9,10 @@ import textwrap
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 
 
-def build_report(incident):
+def build_report(incident, preview_path=None):
     output = BytesIO()
     c = canvas.Canvas(output, pagesize=A4)
     width, height = A4
@@ -90,6 +91,22 @@ def build_report(incident):
         ("Frames", str(incident["video"].get("width")) + " x " + str(incident["video"].get("height"))),
     ):
         row(label, value)
+
+
+    # Embed an ACTUAL decoded frame from the submitted recording. Never invent
+    # plate close-ups or labels. The rest of the original footage remains linked
+    # by its immutable source SHA-256 in the report.
+    if preview_path is not None and preview_path.is_file():
+        ensure(240)
+        section("Source recording - actual unannotated frame")
+        reader = ImageReader(str(preview_path))
+        natural_w, natural_h = reader.getSize()
+        scale = min(505 / natural_w, 210 / natural_h)
+        display_w, display_h = natural_w * scale, natural_h * scale
+        c.drawImage(reader, 42, y - display_h, width=display_w, height=display_h,
+                    mask="auto")
+        y -= display_h + 10
+        paragraph("Image is taken directly from the uploaded video. This single frame does not prove a traffic offense.")
 
     section("AI execution state")
     for label, value in (
