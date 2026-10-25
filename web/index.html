@@ -72,6 +72,6 @@
   <div class="login-mark">TE <span>/ LAB</span></div><div class="login-rule"></div><span class="overline">OPERATOR ACCESS</span><h2 id="loginHeading">Safer roads start<br>with <em>better evidence.</em></h2>
   <p>This development build uses a temporary operator key, not a consumer login. Do not expose it publicly until full user authentication is implemented.</p>
   <form id="loginForm"><label for="key">API OPERATOR KEY</label><input id="key" type="password" autocomplete="off" placeholder="Enter TE_API_KEY" required><button class="button primary full">Enter workspace ↗</button></form>
-  <p id="loginError" class="error" role="alert"></p><small>Local development default: <code>dev-only-change-me</code></small>
+  <p id="loginError" class="error" role="alert"></p><small>Windows launcher: use the private key in <code>.traffic-local-key</code> (PowerShell: <code>Get-Content .\.traffic-local-key</code>). Codespaces: <code>cat .codespace-api-key</code>. Manual server: use your <code>TE_API_KEY</code>.</small>
 </div></div><div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body></html>
