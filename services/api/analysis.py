@@ -52,7 +52,11 @@ def transcribe_audio(original: Path, metadata: dict) -> dict:
                 "note": f"{type(exc).__name__}: {str(exc)[:250]}"}
 
 
-def inspect_video(original: Path, preview: Path, metadata: dict) -> dict:
+def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) -> dict:
+    def progress(stage):
+        if on_stage:
+            on_stage(stage)
+    progress('decoding_video')
     duration = float(metadata["duration_seconds"])
     second = min(max(duration / 2, 0.5), 12)
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -62,11 +66,17 @@ def inspect_video(original: Path, preview: Path, metadata: dict) -> dict:
     if not preview.is_file() or preview.stat().st_size == 0:
         raise RuntimeError("Failed to extract an actual evidence frame")
 
+    progress('transcribing_audio')
     speech = transcribe_audio(original, metadata)
+    progress('interpreting_driver_claim')
     claim = parse_driver_claim(speech.get("text"))
+    progress('tracking_vehicles')
     tracking = track_vehicles(original, metadata)
+    progress('qwen_visual_reasoning')
     qwen = describe_video(original, duration, claim)
+    progress('reading_plates')
     plates = scan_plates(original, duration)
+    progress('reconciling_evidence')
     target = match_target(claim, tracking)
     assessment = assess_potential_events(claim, qwen)
     sample_detections = tracking.get("detections", [])

@@ -70,7 +70,7 @@ function render(){
 function clearMedia(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null}const root=el("frame");root.replaceChildren();const empty=document.createElement("div");empty.className="empty-frame";empty.textContent="Select a ready incident to inspect original evidence.";root.append(empty)}
 function stateRow(label,value){const wrap=document.createElement("div"),a=document.createElement("span"),b=document.createElement("b");a.textContent=label;b.textContent=(value||"no data").replaceAll("_"," ").toUpperCase();if(["not_configured","failed"].includes(value))b.className="warn";else if(value!=="completed")b.className="muted";wrap.append(a,b);return wrap}
 function showAnalysis(x){
- el("selected").textContent=x.id.slice(0,12).toUpperCase()+" / "+x.status.toUpperCase();
+ el("selected").textContent=x.id.slice(0,12).toUpperCase()+" / "+x.status.toUpperCase()+" / "+(x.stage||"").replaceAll("_"," ").toUpperCase();
  el("play").disabled=x.status!=="ready";el("pdf").disabled=x.status!=="ready";
  const a=x.analysis||{}, stages=el("stages");stages.replaceChildren(
    stateRow("VEHICLE DETECTION",a.vehicle_detection?.status||x.status),

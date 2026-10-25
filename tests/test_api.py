@@ -59,6 +59,7 @@ def test_real_video_pipeline_and_pdf(client, tmp_path):
     assert read.status_code == 200
     data = read.json()
     assert data["status"] == "ready", data
+    assert data["stage"] == "complete"
     assert data["duration"] >= 1
     assert len(data["sha256"]) == 64
     assert data["analysis"]["evidence"]["keyframe_extracted"] is True

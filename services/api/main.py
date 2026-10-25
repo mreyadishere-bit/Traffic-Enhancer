@@ -48,8 +48,14 @@ def initialize():
             created_at TEXT NOT NULL, sha256 TEXT NOT NULL,
             bytes INTEGER NOT NULL, duration REAL NOT NULL,
             video_json TEXT NOT NULL, status TEXT NOT NULL,
-            analysis_json TEXT, error TEXT
+            analysis_json TEXT, error TEXT, stage TEXT DEFAULT 'queued'
         )""")
+
+    # Migration for repositories that already ran the earlier SQLite MVP.
+    with connect() as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(incidents)").fetchall()}
+        if "stage" not in columns:
+            db.execute("ALTER TABLE incidents ADD COLUMN stage TEXT DEFAULT 'unknown'")
 
 
 @asynccontextmanager
@@ -84,7 +90,7 @@ def public_incident(row):
         "bytes": row["bytes"], "duration": row["duration"],
         "video": json.loads(row["video_json"]), "status": row["status"],
         "analysis": json.loads(row["analysis_json"]) if row["analysis_json"] else None,
-        "error": row["error"],
+        "error": row["error"], "stage": row.get("stage") or row["status"],
     }
 
 
@@ -119,18 +125,21 @@ def probe(path):
 
 def analyze_record(incident_id):
     with connect() as db:
-        db.execute("UPDATE incidents SET status='processing', error=NULL WHERE id=?", (incident_id,))
+        db.execute("UPDATE incidents SET status='processing', stage='starting', error=NULL WHERE id=?", (incident_id,))
     try:
         row = read_incident(incident_id)
+        def on_stage(stage):
+            with connect() as db:
+                db.execute("UPDATE incidents SET stage=? WHERE id=?", (stage, incident_id))
         result = inspect_video(EVIDENCE / (incident_id + ".video"),
                                DERIVED / (incident_id + ".jpg"),
-                               json.loads(row["video_json"]))
+                               json.loads(row["video_json"]), on_stage=on_stage)
         with connect() as db:
-            db.execute("UPDATE incidents SET status='ready', analysis_json=? WHERE id=?",
+            db.execute("UPDATE incidents SET status='ready', stage='complete', analysis_json=? WHERE id=?",
                        (json.dumps(result, ensure_ascii=False), incident_id))
     except Exception as exc:
         with connect() as db:
-            db.execute("UPDATE incidents SET status='failed', error=? WHERE id=?",
+            db.execute("UPDATE incidents SET status='failed', stage='failed', error=? WHERE id=?",
                        (str(exc)[:500], incident_id))
 
 
@@ -214,7 +223,7 @@ def reanalyze(incident_id: str, background: BackgroundTasks):
     if row["status"] in {"queued", "processing"}:
         raise HTTPException(409, "Analysis already pending")
     with connect() as db:
-        db.execute("UPDATE incidents SET status='queued', analysis_json=NULL, error=NULL WHERE id=?",
+        db.execute("UPDATE incidents SET status='queued', stage='queued', analysis_json=NULL, error=NULL WHERE id=?",
                    (incident_id,))
     background.add_task(analyze_record, incident_id)
     return {"id": incident_id, "status": "queued"}
