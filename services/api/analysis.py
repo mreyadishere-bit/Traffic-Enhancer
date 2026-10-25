@@ -1,82 +1,105 @@
-"""Real evidence metadata / thumbnails plus strictly opt-in AI inference.
+"""Video evidence pipeline with explicit capability / uncertainty states.
 
-No detector, ASR, license plate or violation result is synthesized when the
-required model is absent. Hardware integration is outside this module.
+All real AI stages are optional, independently fail-safe, and must preserve
+their model/source details. No fabricated findings or government decisions.
 """
 import os
 import subprocess
 import tempfile
 from pathlib import Path
 
+from .intent import parse_driver_claim
+from .tracker import track_vehicles
+from .qwen import describe_video
+from .plate import scan_plates
+from .assessment import match_target, assess_potential_events
 
-def inspect_video(original: Path, preview: Path, metadata: dict):
-    second = min(max(metadata["duration_seconds"] / 2, 0.5), 12)
-    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-               "-ss", str(second), "-i", str(original),
-               "-frames:v", "1", "-q:v", "3", str(preview)]
-    subprocess.run(command, check=True, capture_output=True, timeout=50)
-    if not preview.is_file() or preview.stat().st_size == 0:
-        raise RuntimeError("Failed to extract evidence preview")
 
-    result = {
-        "evidence": {"video_metadata": metadata, "keyframe_second": round(second, 2),
-                     "keyframe_extracted": True},
-        "vehicle_detection": {"status": "not_configured", "detections": [],
-                              "note": "Set TE_YOLO_MODEL and install requirements-ai.txt to enable actual inference."},
-        "transcription": {"status": "not_configured", "text": None},
-        "plate_recognition": {"status": "not_implemented", "value": None},
-        "object_tracking": {"status": "not_implemented", "tracks": []},
-        "violation_assessment": {"status": "not_implemented", "conclusion": None},
-        "review_status": "unreviewed",
-    }
-
-    model_name = os.environ.get("TE_YOLO_MODEL", "").strip()
-    if model_name:
-        try:
-            from ultralytics import YOLO
-            model = YOLO(model_name)
-            predictions = model.predict(source=str(preview), conf=0.30, verbose=False, device="cpu")
-            detections = []
-            for prediction in predictions:
-                for item in prediction.boxes:
-                    index = int(item.cls[0].item())
-                    label = str(prediction.names[index])
-                    if label not in {"car", "truck", "bus", "motorcycle"}:
-                        continue
-                    detections.append({
-                        "label": label, "confidence": round(float(item.conf[0].item()), 4),
-                        "box_xyxy": [round(float(v), 1) for v in item.xyxy[0].tolist()],
-                        "frame_second": round(second, 2),
-                    })
-            result["vehicle_detection"] = {
-                "status": "completed", "detections": detections,
-                "note": "Detections from one actual frame only. Not vehicle tracking or violation recognition.",
-                "model": model_name,
-            }
-        except Exception as exc:
-            result["vehicle_detection"] = {"status": "failed", "detections": [],
-                                            "note": str(exc)[:250]}
-
-    speech_model = os.environ.get("TE_ASR_MODEL", "").strip()
-    if speech_model and metadata.get("has_audio"):
+def transcribe_audio(original: Path, metadata: dict) -> dict:
+    if not metadata.get("has_audio"):
+        return {"status": "unavailable", "text": None,
+                "note": "The uploaded video has no audio track."}
+    model_name = os.getenv("TE_ASR_MODEL", "").strip()
+    if not model_name:
+        return {"status": "not_configured", "text": None,
+                "note": "Install faster-whisper and set TE_ASR_MODEL."}
+    try:
+        from faster_whisper import WhisperModel
         with tempfile.TemporaryDirectory() as temp:
             wav = Path(temp) / "speech.wav"
-            try:
-                subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                                "-i", str(original), "-vn", "-ac", "1", "-ar", "16000",
-                                str(wav)], check=True, capture_output=True, timeout=60)
-                from faster_whisper import WhisperModel
-                model = WhisperModel(speech_model, device="cpu", compute_type="int8")
-                segments, info = model.transcribe(str(wav), beam_size=3)
-                result["transcription"] = {
-                    "status": "completed",
-                    "text": " ".join(segment.text.strip() for segment in segments).strip(),
-                    "language": info.language, "model": speech_model,
-                }
-            except Exception as exc:
-                result["transcription"] = {"status": "failed", "text": None,
-                                           "note": str(exc)[:250]}
-    elif not metadata.get("has_audio"):
-        result["transcription"] = {"status": "unavailable", "text": None,
-                                   "note": "Recording has no audio track"}
-    return result
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                            "-i", str(original), "-vn", "-ac", "1",
+                            "-ar", "16000", str(wav)], check=True, capture_output=True, timeout=65)
+            model = WhisperModel(model_name,
+                                 device=os.getenv("TE_ASR_DEVICE", "cpu"),
+                                 compute_type=os.getenv("TE_ASR_COMPUTE_TYPE", "int8"),
+                                 local_files_only=os.getenv("TE_ASR_ALLOW_DOWNLOAD", "0") != "1")
+            segments, info = model.transcribe(str(wav), beam_size=3,
+                                               vad_filter=True)
+            parts = []
+            timestamps = []
+            for segment in segments:
+                parts.append(segment.text.strip())
+                timestamps.append({"start": round(segment.start, 2),
+                                   "end": round(segment.end, 2),
+                                   "text": segment.text.strip()})
+            return {"status": "completed", "text": " ".join(parts).strip(),
+                    "segments": timestamps[:100], "language": info.language,
+                    "model": model_name,
+                    "note": "Automated transcript; may be inaccurate in traffic noise."}
+    except Exception as exc:
+        return {"status": "failed", "text": None, "model": model_name,
+                "note": f"{type(exc).__name__}: {str(exc)[:250]}"}
+
+
+def inspect_video(original: Path, preview: Path, metadata: dict) -> dict:
+    duration = float(metadata["duration_seconds"])
+    second = min(max(duration / 2, 0.5), 12)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-ss", str(second), "-i", str(original),
+                    "-frames:v", "1", "-q:v", "3", str(preview)],
+                   check=True, capture_output=True, timeout=50)
+    if not preview.is_file() or preview.stat().st_size == 0:
+        raise RuntimeError("Failed to extract an actual evidence frame")
+
+    speech = transcribe_audio(original, metadata)
+    claim = parse_driver_claim(speech.get("text"))
+    tracking = track_vehicles(original, metadata)
+    qwen = describe_video(original, duration, claim)
+    plates = scan_plates(original, duration)
+    target = match_target(claim, tracking)
+    assessment = assess_potential_events(claim, qwen)
+    sample_detections = tracking.get("detections", [])
+    return {
+        "pipeline_version": "2.0",
+        "evidence": {"video_metadata": metadata, "keyframe_second": round(second, 2),
+                     "keyframe_extracted": True,
+                     "note": "Original bytes preserved. Uploaded time is not capture time."},
+        "transcription": speech,
+        "driver_claim": claim,
+        "vehicle_detection": {
+            "status": tracking["status"],
+            "detections": sample_detections,
+            "model": tracking.get("model"),
+            "note": tracking.get("note"),
+            "scope": "sampled_video_frames" if tracking["status"] == "completed" else None
+        },
+        "object_tracking": {
+            "status": tracking["status"],
+            "method": tracking.get("method"),
+            "tracks": tracking.get("tracks", []),
+            "sampled_frames": tracking.get("sampled_frames"),
+            "stride": tracking.get("stride"),
+            "note": tracking.get("note"),
+        },
+        "visual_reasoning": qwen,
+        "target_matching": target,
+        "plate_recognition": plates,
+        "violation_assessment": assessment,
+        "vehicle_information": {
+            "status": "limited_to_visible_evidence",
+            "official_registry_access": False,
+            "note": "No access to vehicle owner identity, official plate registry or vehicle history."
+        },
+        "review_status": "unreviewed"
+    }

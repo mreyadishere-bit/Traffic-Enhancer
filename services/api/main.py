@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import subprocess
 import uuid
+from fractions import Fraction
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,7 +102,14 @@ def probe(path):
         duration = float(info.get("format", {}).get("duration") or streams[0].get("duration") or 0)
         if not 1 <= duration <= 180:
             raise ValueError("Video must be between 1 and 180 seconds")
-        return {"duration_seconds": round(duration, 3),
+        rate = streams[0].get("avg_frame_rate") or streams[0].get("r_frame_rate") or "0/1"
+        try:
+            frame_rate = float(Fraction(rate))
+            if not 0 < frame_rate < 300:
+                frame_rate = None
+        except (ValueError, ZeroDivisionError):
+            frame_rate = None
+        return {"duration_seconds": round(duration, 3), "frame_rate": frame_rate,
                 "width": streams[0].get("width"), "height": streams[0].get("height"),
                 "codec": streams[0].get("codec_name"),
                 "has_audio": any(s.get("codec_type") == "audio" for s in info.get("streams", []))}
@@ -184,7 +192,9 @@ def get_incident(incident_id: str):
 @app.get("/api/v1/incidents/{incident_id}/video", dependencies=[Depends(authorize)])
 def get_video(incident_id: str):
     row = read_incident(incident_id)
-    return FileResponse(EVIDENCE / (row["id"] + ".video"), media_type="video/mp4",
+    media_type = {".mp4": "video/mp4", ".mov": "video/quicktime",
+                  ".mkv": "video/x-matroska"}.get(Path(row["filename"]).suffix.lower(), "application/octet-stream")
+    return FileResponse(EVIDENCE / (row["id"] + ".video"), media_type=media_type,
                         filename=row["filename"])
 
 
