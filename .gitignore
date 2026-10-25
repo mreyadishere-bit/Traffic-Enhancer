@@ -5,3 +5,6 @@ __pycache__/
 /data/
 *.pyc
 .DS_Store
+
+.traffic-local-key
+.codespace-api-key

@@ -1,0 +1,26 @@
+name: Package Windows launcher
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create portable source launcher ZIP
+        run: |
+          mkdir -p dist/Traffic-Enhancer
+          cp -r services web scripts dist/Traffic-Enhancer/
+          cp requirements.txt requirements-ai.txt requirements-vlm.txt requirements-ocr.txt requirements-qwen-remote.txt dist/Traffic-Enhancer/
+          cp Start-Traffic-Enhancer.cmd Start-Traffic-Enhancer-AI.cmd dist/Traffic-Enhancer/
+          cp README.md dist/Traffic-Enhancer/
+          cd dist
+          zip -qr Traffic-Enhancer-Windows.zip Traffic-Enhancer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Traffic-Enhancer-Windows
+          path: dist/Traffic-Enhancer-Windows.zip
+          retention-days: 30

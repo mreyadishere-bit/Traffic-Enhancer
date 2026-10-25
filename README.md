@@ -1,3 +1,5 @@
+[Launch from GitHub Codespaces](https://codespaces.new/mreyadishere-bit/Traffic-Enhancer?quickstart=1) · [One-click launcher and deployment guide](docs/QUICK_START_GITHUB.md)
+
 # Traffic Enhancer
 
 **Turning Every Drive into an Opportunity for Safer Roads.**
@@ -80,3 +82,8 @@ The Compose deployment binds only to **127.0.0.1:18090**. It never uses public p
 | Full multi-user security / production workflow | Not implemented |
 
 Mobile source: [apps/mobile](apps/mobile/README.md). Read [system architecture](docs/ARCHITECTURE.md), [DDPAI feasibility](docs/CAMERA_FEASIBILITY.md), and [planned camera interface](integrations/dashcams/README.md).
+
+
+## Open from GitHub automatically
+
+Codespaces now auto-starts the **private** preview app. Each push runs both CI and an automatic Windows launcher ZIP package in GitHub Actions. See [Quick start from GitHub](docs/QUICK_START_GITHUB.md). GitHub Pages cannot host this Python + AI backend, so production deployment remains separate.
