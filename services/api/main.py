@@ -75,6 +75,22 @@ def authorize(authorization: str | None = Header(default=None)):
         raise HTTPException(401, "Invalid operator key")
 
 
+def evidence_path(row):
+    """Give image/video libraries a supported filename suffix.
+
+    Old MVP evidence retained as .video remains accessible for playback.
+    New uploads are stored as actual .mp4/.mov/.mkv files so OpenCV/YOLO
+    can decode the recorded footage.
+    """
+    safe_suffix = Path(row["filename"]).suffix.lower()
+    if safe_suffix not in {".mp4", ".mov", ".mkv"}:
+        safe_suffix = ".mp4"
+    new_path = EVIDENCE / (row["id"] + safe_suffix)
+    if new_path.exists():
+        return new_path
+    return EVIDENCE / (row["id"] + ".video")
+
+
 def read_incident(incident_id):
     with connect() as db:
         row = db.execute("SELECT * FROM incidents WHERE id=?", (incident_id,)).fetchone()
@@ -131,7 +147,7 @@ def analyze_record(incident_id):
         def on_stage(stage):
             with connect() as db:
                 db.execute("UPDATE incidents SET stage=? WHERE id=?", (stage, incident_id))
-        result = inspect_video(EVIDENCE / (incident_id + ".video"),
+        result = inspect_video(evidence_path(row),
                                DERIVED / (incident_id + ".jpg"),
                                json.loads(row["video_json"]), on_stage=on_stage)
         with connect() as db:
@@ -178,7 +194,7 @@ async def upload_incident(background: BackgroundTasks, video: UploadFile = File(
     if Path(filename).suffix.lower() not in {".mp4", ".mov", ".mkv"}:
         raise HTTPException(415, "Supported file extensions: .mp4, .mov, .mkv")
     incident_id = uuid.uuid4().hex
-    path = EVIDENCE / (incident_id + ".video")
+    path = EVIDENCE / (incident_id + Path(filename).suffix.lower())
     digest = hashlib.sha256()
     size = 0
     try:
@@ -225,7 +241,7 @@ def get_video(incident_id: str):
     row = read_incident(incident_id)
     media_type = {".mp4": "video/mp4", ".mov": "video/quicktime",
                   ".mkv": "video/x-matroska"}.get(Path(row["filename"]).suffix.lower(), "application/octet-stream")
-    return FileResponse(EVIDENCE / (row["id"] + ".video"), media_type=media_type,
+    return FileResponse(evidence_path(row), media_type=media_type,
                         filename=row["filename"])
 
 

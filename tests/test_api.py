@@ -66,6 +66,7 @@ def test_real_video_pipeline_and_pdf(client, tmp_path):
     assert data["stage"] == "complete"
     assert data["duration"] >= 1
     assert len(data["sha256"]) == 64
+    assert main.evidence_path(main.read_incident(incident_id)).suffix == ".mp4"
     assert data["analysis"]["evidence"]["keyframe_extracted"] is True
     assert data["analysis"]["vehicle_detection"]["status"] in {"not_configured", "completed"}
     assert data["analysis"]["violation_assessment"]["conclusion"] is None
