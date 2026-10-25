@@ -1,0 +1,6 @@
+-r requirements-ai.txt
+transformers>=4.52,<5
+accelerate>=1.8,<2
+qwen-vl-utils>=0.0.10,<1
+pillow>=10,<13
+torch>=2.4,<3
