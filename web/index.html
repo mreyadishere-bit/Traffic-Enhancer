@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1119"><meta name="description" content="Traffic Enhancer — traceable dashcam evidence analysis.">
+<title>Traffic Enhancer · Evidence Studio</title><link rel="stylesheet" href="/styles.css"><script defer src="/app.js"></script></head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="/"><div class="brand-logo"><svg viewBox="0 0 44 44" fill="none" aria-hidden="true"><path d="M8 35 18 9h8l10 26" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M22 13v5m0 6v5m0 5v2" stroke="#10232a" stroke-width="3" stroke-linecap="round"/></svg></div><div>TRAFFIC <strong>ENHANCER</strong><small>INTELLIGENCE PLATFORM</small></div></a>
+  <div class="menu-label">WORKSPACE</div>
+  <nav class="nav"><a class="active" href="#overview"><span>▦</span> Overview</a><a href="#studio"><span>◈</span> AI Studio</a><a href="#incidents"><span>▤</span> Incident library</a></nav>
+  <div class="menu-label second">RESOURCES</div>
+  <nav class="nav"><a href="/docs" target="_blank" rel="noopener"><span>⌘</span> API docs ↗</a><a href="https://github.com/mreyadishere-bit/Traffic-Enhancer" target="_blank" rel="noopener"><span>⌁</span> Repository ↗</a></nav>
+  <div class="sidebar-bottom"><div class="build-pill"><span class="dot"></span> WORKING MVP <span>v0.1</span></div><p>Preliminary evidence assessments only. Not an official enforcement service.</p></div>
+</aside>
+<div class="content">
+<header class="top"><span>PLATFORM <b>/</b> <strong>Evidence Workspace</strong></span><div><span id="today"></span><span class="service"><i class="dot"></i> DEVELOPMENT SYSTEM</span><button class="link-button" id="disconnect">Disconnect</button></div></header>
+<main id="overview">
+<section class="hero"><div><div class="overline"><i></i> INTELLIGENT ROAD SAFETY</div><h1>Evidence, with <em>clarity.</em></h1><p>Transform real dashcam footage into traceable insights. Nothing assumed, nothing fabricated.</p></div><div class="hero-actions"><button class="button subtle" id="refresh">↻ Refresh</button><button class="button primary" id="newIncident">＋ New incident <span>↗</span></button></div></section>
+<section class="metrics" aria-label="Actual evidence statistics">
+  <div class="metric"><span>TOTAL INCIDENTS <b>↗</b></span><strong id="nTotal">—</strong><small>Original recordings received</small></div>
+  <div class="metric"><span>ANALYSIS READY <b>✓</b></span><strong id="nReady">—</strong><small>Preliminary reports created</small></div>
+  <div class="metric"><span>IN PROGRESS <b>◴</b></span><strong id="nPending">—</strong><small>Queued or processing</small></div>
+  <div class="metric"><span>NEEDS ATTENTION <b>!</b></span><strong id="nFailed">—</strong><small>Failed processing jobs</small></div>
+</section>
+<div class="workspace" id="studio">
+<section class="panel">
+  <div class="panel-header"><div><span class="overline">01 / EVIDENCE INTAKE</span><h2>Bring footage to life.</h2><p>Begin with an actual recording from a camera.</p></div><div class="square-icon">↑</div></div>
+  <div id="drop" class="drop" role="button" tabindex="0" aria-label="Choose dashcam video"><input type="file" id="video" accept=".mp4,.mov,.mkv" hidden>
+    <div class="cloud-icon"><svg viewBox="0 0 80 80" fill="none" aria-hidden="true"><rect x="13" y="22" width="54" height="36" rx="8" stroke="currentColor" stroke-width="1.5"/><path d="M40 57V35m0 0-8 8m8-8 8 8M25 22v-7h30v7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+    <strong id="filename">Drop dashcam footage here</strong><span>or <u>browse files</u> to get started</span><small>MP4 · MOV · MKV / Up to 150 MB / 1–180 seconds</small>
+  </div>
+  <div class="trust"><span>✓ Original preserved</span><span>✓ SHA-256 hash</span><span>✓ Honest analysis</span></div>
+  <button id="upload" class="button primary full" disabled>Analyze recording <span>↗</span></button>
+  <div id="progress" class="progress" hidden><div id="progressBar"></div></div><p id="uploadStatus" class="small-center" role="status">Choose a video to begin.</p>
+</section>
+<section class="panel analysis">
+  <div class="panel-header"><div><span class="overline">02 / ANALYSIS STUDIO</span><h2>Grounded in the footage.</h2><p>Inspect processing results and original evidence.</p></div><div class="square-icon">✳</div></div>
+  <div class="frame" id="frame"><div class="empty-frame"><div class="rings"><span>◈</span></div><strong>Awaiting evidence</strong><small>Select an incident to inspect its analysis.</small></div></div>
+  <div id="stages" class="stages"><div><span>VEHICLE DETECTION</span><b>NO DATA</b></div><div><span>SPEECH TRANSCRIPTION</span><b>NO DATA</b></div><div><span>VIOLATION ASSESSMENT</span><b>NO DATA</b></div></div>
+  <div class="studio-bottom"><small id="selected">NO INCIDENT SELECTED</small><div><button id="play" class="link-button cyan" disabled>Play evidence ↗</button><button id="pdf" class="button mini" disabled>Export PDF ↓</button></div></div>
+</section>
+</div>
+<section id="incidents" class="incidents"><div class="section-bar"><div><span class="overline">03 / EVIDENCE LIBRARY</span><h2>Incident history <small id="count">0</small></h2></div><div class="filters"><input id="search" type="search" placeholder="Search recordings or IDs" aria-label="Search incidents"><select id="filter" aria-label="Filter statuses"><option value="all">All statuses</option><option value="ready">Ready</option><option value="processing">Processing</option><option value="queued">Queued</option><option value="failed">Failed</option></select></div></div>
+<div class="table-wrap"><table><thead><tr><th>RECORDING</th><th>UPLOADED</th><th>DURATION</th><th>STATUS</th><th>DETAILS</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="no-data">Connect to the API to see incidents.</td></tr></tbody></table></div>
+</section>
+<footer><span>TRAFFIC ENHANCER — BUILT ON EVIDENCE, NOT ASSUMPTIONS.</span><span>PRELIMINARY TECHNICAL MVP · NO OFFICIAL ENFORCEMENT</span></footer>
+</main></div></div>
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="loginHeading"><div class="login">
+  <div class="login-mark">TE <span>/ LAB</span></div><div class="login-rule"></div><span class="overline">OPERATOR ACCESS</span><h2 id="loginHeading">Safer roads start<br>with <em>better evidence.</em></h2>
+  <p>This development build uses a temporary operator key, not a consumer login. Do not expose it publicly until full user authentication is implemented.</p>
+  <form id="loginForm"><label for="key">API OPERATOR KEY</label><input id="key" type="password" autocomplete="off" placeholder="Enter TE_API_KEY" required><button class="button primary full">Enter workspace ↗</button></form>
+  <p id="loginError" class="error" role="alert"></p><small>Local development default: <code>dev-only-change-me</code></small>
+</div></div><div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body></html>
