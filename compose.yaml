@@ -3,6 +3,8 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      TE_ENV: production
     ports:
       - "127.0.0.1:18090:8000"
     volumes:
