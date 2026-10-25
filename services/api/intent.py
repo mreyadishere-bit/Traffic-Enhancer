@@ -48,7 +48,7 @@ SIDE = {
 
 def contains(text, phrase):
     prefix = r"(?:ال)?" if phrase and "\u0600" <= phrase[0] <= "\u06ff" else ""
-    return bool(re.search(r"(?<!\\w)" + prefix + re.escape(phrase) + r"(?!\\w)", text, flags=re.UNICODE))
+    return bool(re.search(r"(?<!\w)" + prefix + re.escape(phrase) + r"(?!\w)", text, flags=re.UNICODE))
 
 
 def find_value(text, options):
