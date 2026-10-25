@@ -26,8 +26,32 @@
   <div class="panel-header"><div><span class="overline">01 / EVIDENCE INTAKE</span><h2>Bring footage to life.</h2><p>Begin with an actual recording from a camera.</p></div><div class="square-icon">↑</div></div>
   <div id="drop" class="drop" role="button" tabindex="0" aria-label="Choose dashcam video"><input type="file" id="video" accept=".mp4,.mov,.mkv" hidden>
     <div class="cloud-icon"><svg viewBox="0 0 80 80" fill="none" aria-hidden="true"><rect x="13" y="22" width="54" height="36" rx="8" stroke="currentColor" stroke-width="1.5"/><path d="M40 57V35m0 0-8 8m8-8 8 8M25 22v-7h30v7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-    <strong id="filename">Drop dashcam footage here</strong><span>or <u>browse files</u> to get started</span><small>MP4 · MOV · MKV / Up to 150 MB / 1–180 seconds</small>
+    <strong id="filename">Drop dashcam footage here</strong><span>or <u>browse files</u> to get started</span><small>MP4 · MOV · MKV · Source up to 512 MB · Trim long videos</small>
   </div>
+  <section class="trim-panel" id="trimPanel" hidden aria-label="Select the video section to analyze">
+    <div class="trim-head">
+      <div><span class="overline">SELECT VIDEO SEGMENT</span><h3>Choose exactly what to analyze.</h3></div>
+      <span class="trim-limit">1–180s per report</span>
+    </div>
+    <video id="trimPreview" controls playsinline preload="metadata" aria-label="Recording preview"></video>
+    <div class="trim-fallback" id="trimFallback" hidden>This browser cannot preview this file. You can still enter the start and end in seconds below; the server will verify and trim the footage.</div>
+    <div class="trim-readout">
+      <span id="sourceLength">Loading duration…</span>
+      <strong id="trimLength">Choose a segment</strong>
+    </div>
+    <div class="trim-control">
+      <label for="trimStart">START <span id="startLabel">0:00</span></label>
+      <input id="trimStart" type="range" min="0" max="20" step="0.1" value="0" aria-label="Start time"/>
+      <label for="trimEnd">END <span id="endLabel">0:20</span></label>
+      <input id="trimEnd" type="range" min="1" max="20" step="0.1" value="20" aria-label="End time"/>
+    </div>
+    <div class="trim-numbers">
+      <label>Start (seconds)<input id="trimStartNumber" type="number" min="0" step="0.1" value="0"/></label>
+      <label>End (seconds)<input id="trimEndNumber" type="number" min="1" step="0.1" value="20"/></label>
+      <button id="playTrim" class="button subtle" type="button">▶ Preview selection</button>
+    </div>
+    <p class="trim-hint" id="trimHint">For longer recordings, only the selected part is analyzed. The complete uploaded source is retained separately for evidence integrity.</p>
+  </section>
   <div class="trust"><span>✓ Original preserved</span><span>✓ SHA-256 hash</span><span>✓ Honest analysis</span></div>
   <button id="upload" class="button primary full" disabled>Analyze recording <span>↗</span></button>
   <div id="progress" class="progress" hidden><div id="progressBar"></div></div><p id="uploadStatus" class="small-center" role="status">Choose a video to begin.</p>

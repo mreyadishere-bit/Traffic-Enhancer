@@ -2,6 +2,9 @@
 // Operator key lives in memory only. This is a single-operator dev MVP.
 const el=id=>document.getElementById(id);
 let key="",items=[],selected=null,mediaUrl=null,currentFile=null,poll=null,toastTimer=null;
+let previewObjectUrl=null,trimDuration=null,trimStart=0,trimEnd=0;
+const trimFormat=s=>{const seconds=Math.floor(Number(s)||0);return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")};
+const MAX_SEGMENT=180;
 const date=s=>s?new Date(s).toLocaleString():"—";
 const mb=n=>(Number(n)/1024/1024).toFixed(1)+" MB";
 el("today").textContent=new Date().toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric"}).toUpperCase();
@@ -27,18 +30,113 @@ drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDe
 ["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over")}));
 drop.addEventListener("drop",e=>{if(e.dataTransfer.files[0])choose(e.dataTransfer.files[0])});
 upload.addEventListener("change",()=>{if(upload.files[0])choose(upload.files[0])});
-function choose(file){const ext=file.name.split(".").pop().toLowerCase();if(!["mp4","mov","mkv"].includes(ext)){toast("Supported formats: MP4, MOV, MKV");return}if(file.size>150*1024*1024){toast("Video exceeds 150 MB");return}currentFile=file;el("filename").textContent=file.name;el("upload").disabled=false;el("uploadStatus").textContent=mb(file.size)+" · Ready to upload"}
+function removeTrimPreview(){
+ if(previewObjectUrl){URL.revokeObjectURL(previewObjectUrl);previewObjectUrl=null}
+ el("trimPreview").pause();el("trimPreview").removeAttribute("src");el("trimPreview").load();
+ el("trimPanel").hidden=true;trimDuration=null;
+}
+function renderTrim(){
+ const known=Number.isFinite(trimDuration)&&trimDuration>0;
+ if(known){
+   el("trimStart").disabled=false;el("trimEnd").disabled=false;
+   el("trimStart").max=String(trimDuration);
+   el("trimEnd").max=String(trimDuration);
+   el("trimStart").value=String(trimStart);el("trimEnd").value=String(trimEnd);
+   el("sourceLength").textContent="Source length: "+trimFormat(trimDuration);
+ }else{
+   el("trimStart").disabled=true;el("trimEnd").disabled=true;
+   el("sourceLength").textContent="Duration not readable in browser — use second inputs";
+ }
+ el("startLabel").textContent=trimFormat(trimStart);
+ el("endLabel").textContent=trimFormat(trimEnd);
+ el("trimStartNumber").value=String(Math.round(trimStart*10)/10);
+ el("trimEndNumber").value=String(Math.round(trimEnd*10)/10);
+ const length=trimEnd-trimStart;
+ const valid=Number.isFinite(length)&&length>=1&&length<=MAX_SEGMENT&&trimStart>=0
+     &&(!known||trimEnd<=trimDuration+0.01);
+ el("trimLength").textContent=valid?"Selected: "+trimFormat(length)+" ("+length.toFixed(1)+"s)":"Select 1–180 seconds";
+ el("upload").disabled=!currentFile||!valid;
+ el("playTrim").disabled=!known||!valid;
+ el("trimHint").textContent=valid?
+   (known&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11
+    ? "Whole video selected; original will be analyzed as-is."
+    : "The server will re-encode this segment accurately; it keeps the original file and hashes both copies.")
+   : "Choose a clip of at least 1 second and at most 180 seconds.";
+}
+function setTrimBounds(which,raw){
+ let value=Number(raw);
+ if(!Number.isFinite(value))value=which==="start"?trimStart:trimEnd;
+ const maximum=trimDuration??7200;
+ if(which==="start"){
+   trimStart=Math.max(0,Math.min(value,maximum-1));
+   if(trimEnd<=trimStart+1)trimEnd=Math.min(maximum,trimStart+20);
+   if(trimEnd-trimStart>MAX_SEGMENT)trimEnd=Math.min(maximum,trimStart+MAX_SEGMENT);
+ }else{
+   trimEnd=Math.max(1,Math.min(value,maximum));
+   if(trimStart>=trimEnd-1)trimStart=Math.max(0,trimEnd-20);
+   if(trimEnd-trimStart>MAX_SEGMENT)trimStart=Math.max(0,trimEnd-MAX_SEGMENT);
+ }
+ const player=el("trimPreview");
+ if(trimDuration!==null&&player.readyState>=1){try{player.currentTime=trimStart}catch{}}
+ renderTrim();
+}
+function choose(file){
+ const ext=file.name.split(".").pop().toLowerCase();
+ if(!["mp4","mov","mkv"].includes(ext)){toast("Supported formats: MP4, MOV, MKV");return}
+ if(file.size>512*1024*1024){toast("Source exceeds 512 MB. Please reduce file size.");return}
+ removeTrimPreview();
+ currentFile=file;trimStart=0;trimEnd=20;
+ el("filename").textContent=file.name;
+ el("trimPanel").hidden=false;
+ el("uploadStatus").textContent=mb(file.size)+" · Loading video preview…";
+ previewObjectUrl=URL.createObjectURL(file);
+ el("trimPreview").src=previewObjectUrl;
+ el("trimFallback").hidden=true;
+ renderTrim();
+}
+el("trimPreview").addEventListener("loadedmetadata",()=>{
+ const duration=el("trimPreview").duration;
+ if(!Number.isFinite(duration)||duration<1){el("trimFallback").hidden=false;return}
+ trimDuration=duration;trimStart=0;trimEnd=duration<=MAX_SEGMENT?duration:Math.min(20,duration);
+ el("uploadStatus").textContent=duration>MAX_SEGMENT?
+   "Long video detected: select your 1–180 second segment below.":
+   "Video ready. You can trim it before analysis.";
+ renderTrim();
+});
+el("trimPreview").addEventListener("error",()=>{
+ if(!currentFile)return;
+ el("trimFallback").hidden=false;
+ el("uploadStatus").textContent="Cannot preview the codec in your browser. Enter segment seconds to trim.";
+ renderTrim();
+});
+el("trimPreview").addEventListener("timeupdate",()=>{
+ if(el("trimPreview").currentTime>trimEnd+0.08&&trimEnd>trimStart){
+   el("trimPreview").pause();
+   el("trimPreview").currentTime=trimStart;
+ }
+});
+el("playTrim").addEventListener("click",()=>{
+ const player=el("trimPreview");
+ if(!Number.isFinite(trimDuration))return;
+ player.currentTime=trimStart;player.play().catch(()=>toast("Preview not supported; server can still trim."));
+});
+el("trimStart").addEventListener("input",e=>setTrimBounds("start",e.target.value));
+el("trimEnd").addEventListener("input",e=>setTrimBounds("end",e.target.value));
+el("trimStartNumber").addEventListener("change",e=>setTrimBounds("start",e.target.value));
+el("trimEndNumber").addEventListener("change",e=>setTrimBounds("end",e.target.value));
 el("upload").addEventListener("click",()=>{
  if(!currentFile||!key)return;
  const xhr=new XMLHttpRequest();xhr.open("POST","/api/v1/incidents");xhr.setRequestHeader("Authorization","Bearer "+key);
  const data=new FormData();data.append("video",currentFile,currentFile.name);
+ const full=Number.isFinite(trimDuration)&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11;
+ if(!full){data.append("start_seconds",String(trimStart));data.append("end_seconds",String(trimEnd))}
  el("upload").disabled=true;el("progress").hidden=false;el("progressBar").style.width="0%";el("uploadStatus").textContent="Uploading original footage…";
  xhr.upload.onprogress=e=>{if(e.lengthComputable)el("progressBar").style.width=Math.round(100*e.loaded/e.total)+"%"};
  xhr.onload=async()=>{
   let body={};try{body=JSON.parse(xhr.responseText)}catch{}
   if(xhr.status===202){
    toast("Original evidence accepted and hashed.");
-   currentFile=null;upload.value="";el("filename").textContent="Drop dashcam footage here";
+   currentFile=null;upload.value="";el("filename").textContent="Drop dashcam footage here";removeTrimPreview();
    el("uploadStatus").textContent="Analyzing actual footage. Status will update…";
    await refresh();const match=items.find(x=>x.id===body.id);if(match)selectIncident(match);
    let tries=0;const track=setInterval(async()=>{tries++;await refresh();let x=items.find(i=>i.id===body.id);if((x&&!["queued","processing"].includes(x.status))||tries>40){clearInterval(track);el("progress").hidden=true;el("uploadStatus").textContent=x?.status==="ready"?"Preliminary report ready.":"View the incident library for job status."}},2000);
