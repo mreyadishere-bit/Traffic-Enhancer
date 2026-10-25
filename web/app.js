@@ -13,7 +13,7 @@ async function api(path,opts={}){
 }
 el("loginForm").addEventListener("submit",async e=>{
  e.preventDefault();key=el("key").value;el("loginError").textContent="";
- try{const r=await api("/incidents");items=(await r.json()).items;el("overlay").classList.add("hidden");el("key").value="";render();refreshLoop()}catch(error){key="";el("loginError").textContent=error.message}
+ try{const r=await api("/incidents");items=(await r.json()).items;el("overlay").classList.add("hidden");el("key").value="";render();refreshLoop();const caps=(await(await api("/capabilities")).json());if(!caps.qwen.configured)toast("Qwen2.5-VL is not configured on this backend. See docs/AI_RUNTIME.md.");}catch(error){key="";el("loginError").textContent=error.message}
 });
 el("disconnect").addEventListener("click",()=>{key="";items=[];selected=null;if(poll)clearInterval(poll);clearMedia();render();el("overlay").classList.remove("hidden")});
 function refreshLoop(){if(poll)clearInterval(poll);poll=setInterval(()=>{if(items.some(x=>["queued","processing"].includes(x.status)))refresh()},3000)}

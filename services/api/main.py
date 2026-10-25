@@ -143,6 +143,28 @@ def analyze_record(incident_id):
                        (str(exc)[:500], incident_id))
 
 
+@app.get("/api/v1/capabilities", dependencies=[Depends(authorize)])
+def capabilities():
+    """Configuration availability, NOT evidence of model accuracy or successful inference."""
+    enabled = os.getenv("TE_ENABLE_QWEN", "0") == "1"
+    remote = bool(os.getenv("TE_QWEN_API_BASE", "").strip())
+    return {
+        "qwen": {"configured": enabled,
+                 "mode": "operator_configured_remote" if remote else "local",
+                 "model": os.getenv("TE_QWEN_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct") if enabled else None,
+                 "loaded_and_validated": False},
+        "vehicle_tracking": {"configured": bool(os.getenv("TE_YOLO_MODEL", "").strip()),
+                             "model_tested": False},
+        "speech": {"configured": bool(os.getenv("TE_ASR_MODEL", "").strip()),
+                   "model_tested": False},
+        "plate_ocr": {"configured": bool(os.getenv("TE_PLATE_MODEL", "").strip()),
+                      "model_tested": False},
+        "traffic_violation_verification": {"available": False,
+                                           "human_review_required": True},
+        "dashcam_direct_sync": {"available": False, "requires_hardware_test": True}
+    }
+
+
 @app.get("/api/v1/health")
 def health():
     return {"status": "ok", "service": "traffic-enhancer-api"}

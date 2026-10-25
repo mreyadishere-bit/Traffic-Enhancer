@@ -29,6 +29,10 @@ def test_health_and_auth(client):
     assert client.get("/api/v1/health").json()["status"] == "ok"
     assert client.get("/api/v1/incidents").status_code == 401
     assert client.get("/api/v1/incidents", headers=headers()).status_code == 200
+    caps = client.get("/api/v1/capabilities", headers=headers())
+    assert caps.status_code == 200
+    assert caps.json()["traffic_violation_verification"]["available"] is False
+    assert client.get("/api/v1/capabilities").status_code == 401
     assert client.get("/api/v1/incidents/nope", headers=headers()).status_code == 404
 
 
