@@ -77,3 +77,58 @@ def test_real_video_pipeline_and_pdf(client, tmp_path):
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
     assert len(pdf.content) > 1500  # includes original extracted frame as an image
     assert client.get(f"/api/v1/incidents/{incident_id}/report.pdf").status_code == 401
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                    reason="FFmpeg required for real trim integration")
+def test_long_source_can_be_trimmed_without_losing_original(client, tmp_path):
+    import hashlib
+    source = tmp_path / "long-recording.mp4"
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=green:s=160x120:r=3",
+        "-t", "205", "-c:v", "mpeg4", str(source)
+    ], check=True)
+    original_bytes = source.read_bytes()
+    original_hash = hashlib.sha256(original_bytes).hexdigest()
+
+    too_long = client.post("/api/v1/incidents", headers=headers(),
+        files={"video": ("long-recording.mp4", original_bytes, "video/mp4")})
+    assert too_long.status_code == 422
+    assert not list(main.EVIDENCE.iterdir()), "Rejected uploads must be cleaned up"
+
+    response = client.post("/api/v1/incidents", headers=headers(),
+        data={"start_seconds": "80", "end_seconds": "100"},
+        files={"video": ("long-recording.mp4", original_bytes, "video/mp4")})
+    assert response.status_code == 202, response.text
+    incident_id = response.json()["id"]
+    record = client.get(f"/api/v1/incidents/{incident_id}", headers=headers()).json()
+    assert record["status"] == "ready", record
+    assert 18 <= record["duration"] <= 21
+    assert record["sha256"] == original_hash
+    assert record["video"]["selection"]["was_trimmed"] is True
+    assert record["video"]["selection"]["start_seconds"] == 80
+    assert record["video"]["selection"]["end_seconds"] == 100
+    assert record["video"]["selection"]["clip_sha256"] != original_hash
+    original = client.get(f"/api/v1/incidents/{incident_id}/source", headers=headers())
+    assert original.status_code == 200
+    assert original.content == original_bytes
+    clip = client.get(f"/api/v1/incidents/{incident_id}/video", headers=headers())
+    assert clip.status_code == 200
+    assert clip.content != original_bytes
+    assert client.get(f"/api/v1/incidents/{incident_id}/report.pdf", headers=headers()).status_code == 200
+    assert client.get(f"/api/v1/incidents/{incident_id}/source").status_code == 401
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                    reason="FFmpeg required for trim bounds test")
+def test_invalid_trim_bounds_do_not_save_evidence(client, tmp_path):
+    file = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y",
+       "-f","lavfi","-i","color=c=red:s=160x120:r=3",
+       "-t","4","-c:v","mpeg4",str(file)],check=True)
+    response = client.post("/api/v1/incidents", headers=headers(),
+       data={"start_seconds":"1","end_seconds":"100"},
+       files={"video":("clip.mp4",file.read_bytes(),"video/mp4")})
+    assert response.status_code == 422
+    assert not list(main.EVIDENCE.iterdir())

@@ -8,7 +8,7 @@ An early-stage road evidence platform. The first **runnable web vertical slice**
 
 ## Start locally
 
-Install **Python 3.11+** and **FFmpeg/ffprobe** first, then:
+Install Python 3.11+ first. **FFmpeg/ffprobe are auto-provisioned** through the Python `static-ffmpeg` dependency when missing, on the first upload (internet required once); preinstalled tools are preferred. Then:
 
 ~~~bash
 git clone https://github.com/mreyadishere-bit/Traffic-Enhancer.git
@@ -28,7 +28,7 @@ For Windows PowerShell, replace the export command with:
 $env:TE_API_KEY="replace-with-long-random-key"
 ~~~
 
-Open [http://localhost:8000](http://localhost:8000), enter the configured operator key and upload an MP4, MOV or MKV video (1–180 seconds, max 150 MB). The application persists the original bytes and SHA-256 hash in the ignored \`data/\` directory. The REST endpoints and interactive OpenAPI documentation are at [http://localhost:8000/docs](http://localhost:8000/docs).
+Open [http://localhost:8000](http://localhost:8000), enter the configured operator key and upload an MP4, MOV or MKV video. Select **a clip of 1–180 seconds** using the new in-browser visual trim slider and second inputs; the source may be longer (up to 7200 seconds and 512 MB by default). The application persists the original bytes and SHA-256 hash in the ignored \`data/\` directory. The REST endpoints and interactive OpenAPI documentation are at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 The API default is \`dev-only-change-me\` in development **only**. Never expose it to the internet.
 

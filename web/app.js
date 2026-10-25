@@ -2,7 +2,7 @@
 // Operator key lives in memory only. This is a single-operator dev MVP.
 const el=id=>document.getElementById(id);
 let key="",items=[],selected=null,mediaUrl=null,currentFile=null,poll=null,toastTimer=null;
-let previewObjectUrl=null,trimDuration=null,trimStart=0,trimEnd=0;
+let previewObjectUrl=null,trimDuration=null,trimStart=0,trimEnd=0,trimReady=false;
 const trimFormat=s=>{const seconds=Math.floor(Number(s)||0);return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")};
 const MAX_SEGMENT=180;
 const date=s=>s?new Date(s).toLocaleString():"—";
@@ -33,7 +33,7 @@ upload.addEventListener("change",()=>{if(upload.files[0])choose(upload.files[0])
 function removeTrimPreview(){
  if(previewObjectUrl){URL.revokeObjectURL(previewObjectUrl);previewObjectUrl=null}
  el("trimPreview").pause();el("trimPreview").removeAttribute("src");el("trimPreview").load();
- el("trimPanel").hidden=true;trimDuration=null;
+ el("trimPanel").hidden=true;trimDuration=null;trimReady=false;
 }
 function renderTrim(){
  const known=Number.isFinite(trimDuration)&&trimDuration>0;
@@ -55,7 +55,7 @@ function renderTrim(){
  const valid=Number.isFinite(length)&&length>=1&&length<=MAX_SEGMENT&&trimStart>=0
      &&(!known||trimEnd<=trimDuration+0.01);
  el("trimLength").textContent=valid?"Selected: "+trimFormat(length)+" ("+length.toFixed(1)+"s)":"Select 1–180 seconds";
- el("upload").disabled=!currentFile||!valid;
+ el("upload").disabled=!currentFile||!valid||!trimReady;
  el("playTrim").disabled=!known||!valid;
  el("trimHint").textContent=valid?
    (known&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11
@@ -89,6 +89,7 @@ function choose(file){
  el("filename").textContent=file.name;
  el("trimPanel").hidden=false;
  el("uploadStatus").textContent=mb(file.size)+" · Loading video preview…";
+ trimReady=false;
  previewObjectUrl=URL.createObjectURL(file);
  el("trimPreview").src=previewObjectUrl;
  el("trimFallback").hidden=true;
@@ -97,7 +98,7 @@ function choose(file){
 el("trimPreview").addEventListener("loadedmetadata",()=>{
  const duration=el("trimPreview").duration;
  if(!Number.isFinite(duration)||duration<1){el("trimFallback").hidden=false;return}
- trimDuration=duration;trimStart=0;trimEnd=duration<=MAX_SEGMENT?duration:Math.min(20,duration);
+ trimDuration=duration;trimReady=true;trimStart=0;trimEnd=duration<=MAX_SEGMENT?duration:Math.min(20,duration);
  el("uploadStatus").textContent=duration>MAX_SEGMENT?
    "Long video detected: select your 1–180 second segment below.":
    "Video ready. You can trim it before analysis.";
@@ -105,6 +106,7 @@ el("trimPreview").addEventListener("loadedmetadata",()=>{
 });
 el("trimPreview").addEventListener("error",()=>{
  if(!currentFile)return;
+ trimReady=true;
  el("trimFallback").hidden=false;
  el("uploadStatus").textContent="Cannot preview the codec in your browser. Enter segment seconds to trim.";
  renderTrim();

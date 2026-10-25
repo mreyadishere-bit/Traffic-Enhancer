@@ -87,6 +87,12 @@ def build_report(incident, preview_path=None):
         ("Uploaded at (UTC)", incident["created_at"]),
         ("Source filename", incident["filename"]),
         ("SHA-256", incident["sha256"]),
+        ("Selected source range", (
+            f"{incident['video'].get('selection', {}).get('start_seconds', 0)} - "
+            f"{incident['video'].get('selection', {}).get('end_seconds', incident['duration'])} sec"
+        )),
+        ("Source duration", incident["video"].get("selection", {}).get("source_duration_seconds", incident["duration"])),
+        ("Clip SHA-256", incident["video"].get("selection", {}).get("clip_sha256", incident["sha256"])),
         ("Duration", str(incident["duration"]) + " seconds"),
         ("Frames", str(incident["video"].get("width")) + " x " + str(incident["video"].get("height"))),
     ):
