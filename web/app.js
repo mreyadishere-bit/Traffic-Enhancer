@@ -161,8 +161,8 @@ el("trimEnd").addEventListener("input",e=>setTrimBounds("end",e.target.value));
 el("trimStartNumber").addEventListener("change",e=>setTrimBounds("start",e.target.value));
 el("trimEndNumber").addEventListener("change",e=>setTrimBounds("end",e.target.value));
 el("upload").addEventListener("click",()=>{
- if(!currentFile||!key)return;
- const xhr=new XMLHttpRequest();xhr.open("POST","/api/v1/incidents");xhr.setRequestHeader("Authorization","Bearer "+key);
+ if(!currentFile||!accessReady)return;
+ const xhr=new XMLHttpRequest();xhr.open("POST","/api/v1/incidents");if(key)xhr.setRequestHeader("Authorization","Bearer "+key);
  const data=new FormData();data.append("video",currentFile,currentFile.name);
  const full=Number.isFinite(trimDuration)&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11;
  if(!full){data.append("start_seconds",String(trimStart));data.append("end_seconds",String(trimEnd))}
