@@ -1,44 +1,56 @@
-"""Streamlit Cloud smoke tests: secure gate and authenticated API integration.
-
-Run separately from tests/test_api.py because the latter patches TE_API_KEY
-globally during module import, whereas Streamlit uses its own process keys.
-"""
-import os
+"""Passwordless Streamlit smoke and browser session isolation tests."""
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-
-APP = Path(__file__).resolve().parents[1] / 'streamlit_app.py'
-
 from streamlit.testing.v1 import AppTest
 
+APP = Path(__file__).resolve().parents[1] / "streamlit_app.py"
 
-def test_operator_gate_and_real_api_on_private_cloud(tmp_path, monkeypatch):
-    monkeypatch.setenv("TE_API_KEY","ci-streamlit-long-private-test-key")
-    # Other API tests import the module at collection time with their own key.
-    # Align this test's in-process TestClient with this Cloud instance's secret.
+def prepare(tmp_path, monkeypatch):
     from services.api import main as backend
-    monkeypatch.setattr(backend, "KEY", "ci-streamlit-long-private-test-key")
-    monkeypatch.setenv("TE_DATA_DIR",str(tmp_path/"app"))
-    monkeypatch.delenv("TE_QWEN_API_KEY",raising=False)
-    monkeypatch.delenv("TE_GROQ_API_KEY",raising=False)
-    app = AppTest.from_file(APP,default_timeout=30)
-    app.run()
-    assert not app.exception, [str(x.message) for x in app.exception]
-    assert len(app.text_input)>=1
-    assert "Operator password" in str(app.text_input[0].label)
-    # There must be no video/case workspace before login.
-    assert not any("Incident library" in str(x.label) for x in app.radio)
-    app.session_state["te_logged_in"]=True
-    app.run()
-    assert not app.exception, [str(x.message) for x in app.exception]
-    assert len(app.radio)>=1
-    assert "Overview" in app.radio[0].options
-    assert len(app.metric)>=4
+    monkeypatch.setenv("TE_ENV", "production")
+    monkeypatch.setenv("TE_API_KEY", "ci-internal-key-123456789abcdef")
+    monkeypatch.setattr(backend, "KEY", "ci-internal-key-123456789abcdef")
+    monkeypatch.setattr(backend, "DATA", tmp_path)
+    monkeypatch.setattr(backend, "DB", tmp_path / "traffic.db")
+    monkeypatch.setattr(backend, "EVIDENCE", tmp_path / "evidence")
+    monkeypatch.setattr(backend, "DERIVED", tmp_path / "derived")
+    monkeypatch.delenv("TE_QWEN_API_KEY", raising=False)
+    monkeypatch.delenv("TE_GROQ_API_KEY", raising=False)
+    backend.initialize()
+    return backend
 
-
-def test_missing_secret_fails_closed(monkeypatch):
-    monkeypatch.delenv("TE_API_KEY",raising=False)
-    app=AppTest.from_file(APP,default_timeout=30)
-    app.run()
+def test_opens_without_operator_password(tmp_path, monkeypatch):
+    prepare(tmp_path, monkeypatch)
+    app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception, [str(x.message) for x in app.exception]
-    assert any("locked" in str(x.value).lower() for x in app.error)
-    assert not app.radio
+    assert not app.text_input
+    assert app.radio and "Overview" in app.radio[0].options
+    assert len(app.metric) >= 4
+    assert list(app.session_state["te_case_ids"]) == []
+
+def test_does_not_enumerate_other_browser_cases(tmp_path, monkeypatch):
+    backend = prepare(tmp_path, monkeypatch)
+    case_id = "a" * 32
+    with backend.connect() as db:
+        db.execute("""INSERT INTO incidents
+            (id, filename, created_at, sha256, bytes, duration, video_json, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (case_id, "other-session-case.mp4", datetime.now(timezone.utc).isoformat(),
+             "f" * 64, 128, 2.0, json.dumps({"width": 320, "height": 180}), "ready"))
+    visitor = AppTest.from_file(APP, default_timeout=30).run()
+    assert not visitor.exception, [str(x.message) for x in visitor.exception]
+    assert visitor.metric[0].value == "0"
+    assert not any("other-session-case" in str(x.value) for x in visitor.markdown)
+    visitor.session_state["te_case_ids"] = [case_id]
+    visitor.run()
+    assert not visitor.exception, [str(x.message) for x in visitor.exception]
+    assert visitor.metric[0].value == "1"
+
+def test_visitors_do_not_need_any_password_secret(tmp_path, monkeypatch):
+    prepare(tmp_path, monkeypatch)
+    monkeypatch.delenv("TE_API_KEY", raising=False)
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception, [str(x.message) for x in app.exception]
+    assert not app.text_input
+    assert app.radio and "Overview" in app.radio[0].options
