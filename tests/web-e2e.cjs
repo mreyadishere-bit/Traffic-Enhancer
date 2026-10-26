@@ -7,6 +7,11 @@ const assert = require("node:assert/strict");
   const page=await browser.newPage({viewport:{width:1440,height:980},acceptDownloads:true});
   const errors=[];
   page.on("pageerror",error=>errors.push(error.message));
+  page.on("response",async response=>{
+    if(response.url().includes("/api/v1/incidents") && response.request().method()==="POST"){
+      console.log("UPLOAD HTTP",response.status(),(await response.text()).slice(0,600));
+    }
+  });
   try{
     await page.goto("http://127.0.0.1:8000",{waitUntil:"domcontentloaded"});
     await page.locator("#key").fill("ci-private-operator-key");
@@ -43,6 +48,17 @@ const assert = require("node:assert/strict");
     await page.screenshot({path:"artifacts/ui/evidence-studio-mobile.png",fullPage:true});
     assert.deepEqual(errors,[],"Browser runtime exceptions");
     console.log("PASS: authenticated import, real FFmpeg processing, review save, PDF download, desktop/mobile screenshots");
+  }catch(error){
+    console.error("E2E state:",{
+      uploadStatus:await page.locator("#uploadStatus").textContent().catch(()=>null),
+      toast:await page.locator("#toast").textContent().catch(()=>null),
+      caseCount:await page.locator("#nCases").textContent().catch(()=>null),
+      authVisible:await page.locator("#authScreen").isVisible().catch(()=>null),
+      runtimeErrors:errors
+    });
+    fs.mkdirSync("artifacts/ui",{recursive:true});
+    await page.screenshot({path:"artifacts/ui/diagnostic-failure.png",fullPage:true}).catch(()=>{});
+    throw error;
   }finally{
     await browser.close();
   }

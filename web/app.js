@@ -63,8 +63,8 @@ $("disconnect").addEventListener("click",()=>{
 function refreshLoop(){
   if(refreshTimer)clearInterval(refreshTimer);
   refreshTimer=setInterval(()=>{
-    if(cases.some(x=>["queued","processing"].includes(x.status)))refresh(false);
-  },3000);
+    if(operatorKey)refresh(false);
+  },4000);
 }
 async function refresh(showToast=false){
   if(!operatorKey)return;
