@@ -1,0 +1,30 @@
+# A PRIVATE operator-key-gated online DEMO, not permanent evidence storage.
+# Render free filesystem is ephemeral. Avoid personal or sensitive recordings.
+services:
+  - type: web
+    name: traffic-enhancer-demo
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile
+    autoDeployTrigger: checksPass
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: TE_ENV
+        value: production
+      - key: TE_API_KEY
+        generateValue: true
+      - key: TE_DATA_DIR
+        value: /tmp/traffic-enhancer
+      - key: TE_MAX_SOURCE_MB
+        value: "40"
+      - key: TE_MAX_UPLOAD_MB
+        value: "30"
+      - key: TE_ENABLE_QWEN
+        value: "1"
+      - key: TE_QWEN_API_BASE
+        value: https://openrouter.ai/api/v1
+      - key: TE_QWEN_MODEL
+        value: qwen/qwen-2.5-vl-7b-instruct:free
+      - key: TE_QWEN_API_KEY
+        sync: false
