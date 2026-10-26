@@ -273,75 +273,165 @@ if area == "Overview":
 
 elif area == "New analysis":
     st.markdown('<div class="kicker">01 / EVIDENCE INTAKE</div>', unsafe_allow_html=True)
-    st.header("Begin with the real recording.")
-    st.caption("MP4, MOV or MKV. Keep sources short on free Cloud. A selected interval can be up to 180 seconds.")
-    incoming = st.file_uploader("Choose dashcam footage", type=["mp4","mov","mkv"],
-                                accept_multiple_files=False)
-    if incoming:
+    st.header("Bring in your recording.")
+    st.caption("Upload a real MP4, MOV or MKV file (up to 70 MB). Select a segment before analysis, or use the full video.")
+    incoming = st.file_uploader(
+        "01 · Choose dashcam footage", type=["mp4", "mov", "mkv"],
+        accept_multiple_files=False, key="source_uploader",
+    )
+    st.markdown("### 02 · Optional clip trimming")
+    st.caption("The timeline, exact start/end fields and video preview appear once the uploaded file has finished transferring and FFprobe has read its duration.")
+    if incoming is None:
+        st.info("Choose a video above. You can then trim any 1–180-second section, or analyze the whole file if it is up to 180 seconds long.")
+    else:
         blob = incoming.getvalue()
         if len(blob) > 70 * 1024 * 1024:
-            st.error("This cloud demo accepts up to 70 MB per source. Use a smaller copy locally.")
+            st.error("The cloud demo accepts at most 70 MB per source. Please upload a smaller version.")
         else:
-            signature=(incoming.name,len(blob),hashlib.sha256(blob).hexdigest())
+            signature = (incoming.name, len(blob), hashlib.sha256(blob).hexdigest())
             if st.session_state.get("video_signature") != signature:
-                with st.spinner("Reading video metadata with FFprobe…"):
+                st.session_state.video_signature = signature
+                st.session_state.video_metadata = None
+                st.session_state.video_error = None
+                with st.spinner("Upload received. Inspecting video duration with FFprobe…"):
                     try:
                         with tempfile.TemporaryDirectory() as temp:
-                            source=Path(temp)/Path(incoming.name).name
+                            source = Path(temp) / Path(incoming.name).name
                             source.write_bytes(blob)
                             backend.ensure_media_tools()
                             st.session_state.video_metadata = backend.probe(source)
-                            st.session_state.video_error = None
                     except Exception as exc:
-                        st.session_state.video_metadata = None
                         st.session_state.video_error = str(exc)
-                st.session_state.video_signature = signature
             if st.session_state.get("video_error"):
-                st.error(st.session_state.video_error)
+                st.error("Cannot read this recording: " + st.session_state.video_error)
+                st.caption("Try an MP4 encoded with H.264; do not start analysis until the source can be inspected.")
             elif st.session_state.get("video_metadata"):
-                meta=st.session_state.video_metadata
-                duration=float(meta["duration_seconds"])
-                left,right=st.columns([1.5,1])
+                from services.api.clip_selection import choose_clip_interval
+
+                meta = st.session_state.video_metadata
+                duration = float(meta["duration_seconds"])
+                # Round DOWN rather than up: the API validates clip ends
+                # against FFprobe's precise source duration.
+                upper = max(1.0, int(duration * 10) / 10.0)
+                if st.session_state.get("clip_signature") != signature:
+                    st.session_state.clip_signature = signature
+                    st.session_state.clip_mode = "Select a clip (recommended)"
+                    st.session_state.clip_range = (0.0, min(20.0, upper))
+                    st.session_state.clip_start = 0.0
+                    st.session_state.clip_end = min(20.0, upper)
+
+                def sync_range_to_fields():
+                    st.session_state.clip_start = float(st.session_state.clip_range[0])
+                    st.session_state.clip_end = float(st.session_state.clip_range[1])
+
+                def sync_fields_to_range():
+                    begin = float(st.session_state.clip_start)
+                    finish = float(st.session_state.clip_end)
+                    if 0 <= begin < finish <= upper:
+                        st.session_state.clip_range = (begin, finish)
+
+                mode = st.radio(
+                    "What should be analyzed?",
+                    ["Select a clip (recommended)", "Analyze the entire video"],
+                    key="clip_mode", horizontal=True,
+                )
+                if mode == "Select a clip (recommended)":
+                    st.slider(
+                        "Trim timeline — drag either handle",
+                        min_value=0.0, max_value=upper,
+                        step=0.1, key="clip_range",
+                        on_change=sync_range_to_fields,
+                    )
+                    first, last = st.columns(2)
+                    with first:
+                        st.number_input(
+                            "START · seconds", min_value=0.0,
+                            max_value=upper, step=0.1, format="%.1f",
+                            key="clip_start", on_change=sync_fields_to_range,
+                        )
+                    with last:
+                        st.number_input(
+                            "END · seconds", min_value=0.0,
+                            max_value=upper, step=0.1, format="%.1f",
+                            key="clip_end", on_change=sync_fields_to_range,
+                        )
+                    start = float(st.session_state.clip_start)
+                    end = float(st.session_state.clip_end)
+                else:
+                    start, end = 0.0, duration
+
+                try:
+                    start, end, full = choose_clip_interval(
+                        duration, mode == "Analyze the entire video",
+                        start, end
+                    )
+                    selection_error = None
+                except ValueError as exc:
+                    selection_error = str(exc)
+                    full = False
+
+                if selection_error:
+                    st.warning(selection_error)
+                else:
+                    st.info(
+                        f"Selected {fmt_secs(start)} → {fmt_secs(end)}"
+                        f"  ·  {end-start:.1f} seconds"
+                        f"  ·  {'Entire source' if full else 'Only this section will be analyzed'}."
+                    )
+
+                left, right = st.columns([1.6, 1], gap="large")
                 with left:
-                    st.markdown("**Original recording**")
-                    if incoming.name.lower().endswith(".mp4") and len(blob)<35*1024*1024:
-                        st.video(blob, format="video/mp4")
-                    else:
-                        st.info("Video preview may require an MP4/H.264 copy. Accurate time ranges are still available.")
-                with right:
-                    st.metric("Source duration", fmt_secs(duration))
-                    st.caption(f"Frame rate: {meta.get('frame_rate') or 'Unknown'} · Audio track: {'Yes' if meta.get('has_audio') else 'No'}")
-                    st.caption("Original file kept only in temporary Cloud storage, with no backup.")
-                with st.form("analyze_form"):
-                    upper=round(duration,1)
-                    default_end=min(20.0, upper)
-                    selected_range=st.slider(
-                        "Select source interval (seconds)", min_value=0.0,
-                        max_value=upper, value=(0.0,default_end), step=0.1,
-                    )
-                    st.caption(f"Selected {fmt_secs(selected_range[0])} – {fmt_secs(selected_range[1])}, "
-                               f"{selected_range[1]-selected_range[0]:.1f} sec.")
-                    submit=st.form_submit_button(
-                        "Analyze selected recording", type="primary",
-                        use_container_width=True,
-                        disabled=st.session_state.get("pending_work") is not None,
-                    )
-                if submit:
-                    start,end=selected_range
-                    if end-start<1 or end-start>180:
-                        st.error("Select between 1 and 180 seconds.")
-                    elif len(blob)>50*1024*1024 and start==0 and end>=upper-0.1:
-                        st.error("Choose a shorter interval or smaller source file for Cloud processing.")
-                    else:
-                        full=abs(start)<0.01 and end>=duration-0.11 and duration<=180
-                        if reserve_demo_analysis():
-                            st.session_state.pending_kind = "upload"
-                            st.session_state.pending_work=jobs().submit(
-                                upload_and_analyze,blob,incoming.name,start,end,full)
-                            st.rerun()
+                    st.markdown("#### 03 · Preview your selection")
+                    if incoming.name.lower().endswith(".mp4") and len(blob) < 50 * 1024 * 1024:
+                        if selection_error:
+                            st.info("Enter valid start and end times to preview the selected segment.")
+                        elif full:
+                            st.video(blob, format="video/mp4",
+                                     alt="Original dashcam recording")
                         else:
-                            st.warning("Public demo processing limit reached. Try later or use the local app.")
-                st.caption("Qwen and Whisper run only when you configure their secrets; GPU-based YOLO and Egyptian plate OCR are not enabled on free Community Cloud.")
+                            # Streamlit natively stops preview at the selection's
+                            # end; no expensive server-side transcoding is needed.
+                            st.video(blob, format="video/mp4",
+                                     start_time=f"{start:.1f}s",
+                                     end_time=f"{end:.1f}s",
+                                     alt="Preview of exactly the selected segment")
+                        st.caption("Preview is limited to the selected timeline. "
+                                   "The server trims accurately after you press Analyze.")
+                    else:
+                        st.info("A browser preview is unavailable for this format/size. "
+                                "The start/end controls still work; the server trims the original.")
+                with right:
+                    st.metric("Full source duration", fmt_secs(duration))
+                    st.metric("Selected analysis duration",
+                              "—" if selection_error else f"{end-start:.1f}s")
+                    st.caption(f"FPS: {meta.get('frame_rate') or 'Unknown'}")
+                    st.caption("Audio track: " + ("Yes" if meta.get("has_audio") else "No"))
+                    st.caption("Your original video is transferred in full before trimming. "
+                               "For slower connections, upload a smaller source copy.")
+
+                st.markdown("#### 04 · Analyze the selected footage")
+                st.button(
+                    "Analyze recording",
+                    key="analyze_clip",
+                    type="primary", use_container_width=True,
+                    disabled=selection_error is not None or
+                             st.session_state.get("pending_work") is not None,
+                    on_click=None,
+                )
+                # The button's clicked value is an ephemeral Streamlit state;
+                # consume it immediately, never treat a previous run as a click.
+                if st.session_state.get("analyze_clip", False) and not selection_error:
+                    if reserve_demo_analysis():
+                        st.session_state.pending_kind = "upload"
+                        st.session_state.pending_work = jobs().submit(
+                            upload_and_analyze, blob, incoming.name,
+                            start, end, full
+                        )
+                        st.rerun()
+                    else:
+                        st.warning("Public demo processing limit reached. Try later or use the local app.")
+                st.caption("Cloud demo: Qwen/Whisper require provider secrets. "
+                           "Free Streamlit Cloud does not run local YOLO or evaluated Egyptian-plate OCR.")
 
 elif area in ("Evidence studio","Incident library"):
     st.markdown('<div class="kicker">02 / FOOTAGE & ANALYSIS</div>', unsafe_allow_html=True)
