@@ -9,6 +9,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from functools import lru_cache
 
 
 MODEL_DEFAULT = "Qwen/Qwen2.5-VL-3B-Instruct"
@@ -68,6 +69,16 @@ def _capture_samples(original: Path, folder: Path, duration: float):
     return frames
 
 
+@lru_cache(maxsize=1)
+def cached_local_qwen(model_id, local_only, device_map):
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_only)
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model_id, torch_dtype="auto", device_map=device_map,
+        local_files_only=local_only)
+    return processor, model
+
+
 def describe_video(original: Path, duration: float, claim: dict) -> dict:
     model_id = os.getenv("TE_QWEN_MODEL", MODEL_DEFAULT).strip() or MODEL_DEFAULT
     if os.getenv("TE_ENABLE_QWEN", "0") != "1":
@@ -82,15 +93,10 @@ def describe_video(original: Path, duration: float, claim: dict) -> dict:
                     "observations": None, "note": f"{type(exc).__name__}: {str(exc)[:250]}"}
     try:
         import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
         from qwen_vl_utils import process_vision_info
         local_only = os.getenv("TE_QWEN_ALLOW_DOWNLOAD", "0") != "1"
-        processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_only)
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_id, torch_dtype="auto",
-            device_map=os.getenv("TE_QWEN_DEVICE_MAP", "auto"),
-            local_files_only=local_only
-        )
+        processor, model = cached_local_qwen(
+            model_id, local_only, os.getenv("TE_QWEN_DEVICE_MAP", "auto"))
         with tempfile.TemporaryDirectory() as temp:
             frames = _capture_samples(original, Path(temp), duration)
             if not frames:

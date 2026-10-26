@@ -7,6 +7,14 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from functools import lru_cache
+
+@lru_cache(maxsize=2)
+def cached_whisper(name,device,compute_type,local_files_only):
+    from faster_whisper import WhisperModel
+    return WhisperModel(name,device=device,compute_type=compute_type,
+                        local_files_only=local_files_only)
+
 
 from .intent import parse_driver_claim
 from .tracker import track_vehicles
@@ -24,16 +32,15 @@ def transcribe_audio(original: Path, metadata: dict) -> dict:
         return {"status": "not_configured", "text": None,
                 "note": "Install faster-whisper and set TE_ASR_MODEL."}
     try:
-        from faster_whisper import WhisperModel
         with tempfile.TemporaryDirectory() as temp:
             wav = Path(temp) / "speech.wav"
             subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                             "-i", str(original), "-vn", "-ac", "1",
                             "-ar", "16000", str(wav)], check=True, capture_output=True, timeout=65)
-            model = WhisperModel(model_name,
-                                 device=os.getenv("TE_ASR_DEVICE", "cpu"),
-                                 compute_type=os.getenv("TE_ASR_COMPUTE_TYPE", "int8"),
-                                 local_files_only=os.getenv("TE_ASR_ALLOW_DOWNLOAD", "0") != "1")
+            model = cached_whisper(model_name,
+                                   os.getenv("TE_ASR_DEVICE", "cpu"),
+                                   os.getenv("TE_ASR_COMPUTE_TYPE", "int8"),
+                                   os.getenv("TE_ASR_ALLOW_DOWNLOAD", "0") != "1")
             segments, info = model.transcribe(str(wav), beam_size=3,
                                                vad_filter=True)
             parts = []
