@@ -27,12 +27,35 @@ Write-Host "Installing essential project dependencies..."
 & $python -m pip install --disable-pip-version-check -r requirements.txt
 if ($LASTEXITCODE -ne 0) { throw "Python dependency installation failed." }
 if ($AI) {
-    Write-Host "Installing optional YOLO / Whisper dependencies..."
-    & $python -m pip install --disable-pip-version-check -r requirements-ai.txt
-    if ($LASTEXITCODE -ne 0) { throw "AI dependency installation failed." }
-    $env:TE_YOLO_MODEL = "yolo11n.pt"
-    $env:TE_ASR_MODEL = "small"
+    Write-Host "Checking the real YOLO and Whisper AI packages..." -ForegroundColor Cyan
+    & $python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('ultralytics') and importlib.util.find_spec('faster_whisper') else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Installing Ultralytics, PyTorch dependencies and faster-whisper. First setup downloads may be large..." -ForegroundColor Yellow
+        & $python -m pip install --disable-pip-version-check --prefer-binary -r requirements-ai.txt
+        if ($LASTEXITCODE -ne 0) { throw "AI install failed. Re-run this launcher after checking your internet connection and disk space." }
+    }
+    & $python -c "from ultralytics import YOLO;from faster_whisper import WhisperModel;print('YOLO and Whisper modules ready')"
+    if ($LASTEXITCODE -ne 0) { throw "AI imports failed in the project's Python environment." }
+
+    # Configure real local models only if the operator did not choose others.
+    # 'base' is lighter for CPU-only Windows than the prior 'small' default.
+    if (-not $env:TE_YOLO_MODEL) { $env:TE_YOLO_MODEL = "yolo11n.pt" }
+    if (-not $env:TE_GROQ_ASR_MODEL -and -not $env:TE_ASR_MODEL) { $env:TE_ASR_MODEL = "base" }
+    $env:TE_ASR_DEVICE = "cpu"
+    if (-not $env:TE_ASR_COMPUTE_TYPE) { $env:TE_ASR_COMPUTE_TYPE = "int8" }
     $env:TE_ASR_ALLOW_DOWNLOAD = "1"
+
+    # Model downloads occur on first inference, never report success before that.
+    if ($env:TE_QWEN_API_KEY) {
+        if (-not $env:TE_QWEN_API_BASE) { $env:TE_QWEN_API_BASE = "https://openrouter.ai/api/v1" }
+        if (-not $env:TE_QWEN_MODEL) { $env:TE_QWEN_MODEL = "qwen/qwen-2.5-vl-7b-instruct:free" }
+        $env:TE_ENABLE_QWEN = "1"
+        Write-Host "Qwen remote analysis configured via your existing environment key." -ForegroundColor Green
+    } else {
+        Write-Host "Qwen is OFF locally: Codespaces secrets do not transfer to Windows." -ForegroundColor Yellow
+        Write-Host "To enable Qwen, set TE_QWEN_API_KEY in your local Windows environment before launching."
+    }
+    Write-Host "YOLO weights: $env:TE_YOLO_MODEL. Speech: $(if ($env:TE_GROQ_ASR_MODEL) { $env:TE_GROQ_ASR_MODEL + ' (Groq)' } else { $env:TE_ASR_MODEL + ' (local Whisper)' })."
 }
 $secretPath = ".traffic-local-key"
 if (-not (Test-Path $secretPath)) {
@@ -43,8 +66,7 @@ if (-not (Test-Path $secretPath)) {
 }
 $env:TE_API_KEY = (Get-Content $secretPath -Raw).Trim()
 $env:TE_ENV = "development"
-Write-Host "API operator key (private; stored locally):" -ForegroundColor Yellow
-Write-Host $env:TE_API_KEY
+Write-Host "Local login opens automatically without an operator-key prompt." -ForegroundColor Green
 Write-Host "Your local URL: http://127.0.0.1:8000"
 
 # Show actionable dependency errors instead of opening a broken page.

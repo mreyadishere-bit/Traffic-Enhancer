@@ -4,6 +4,7 @@ All real AI stages are optional, independently fail-safe, and must preserve
 their model/source details. No fabricated findings or government decisions.
 """
 import os
+from functools import lru_cache
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,6 +14,15 @@ from .tracker import track_vehicles
 from .qwen import describe_video
 from .plate import scan_plates
 from .assessment import match_target, assess_potential_events
+
+
+@lru_cache(maxsize=2)
+def loaded_whisper_model(model_name: str, device: str, compute_type: str,
+                         local_files_only: bool):
+    """Reuse local model weights between reports; preserves opt-in download policy."""
+    from faster_whisper import WhisperModel
+    return WhisperModel(model_name, device=device, compute_type=compute_type,
+                        local_files_only=local_files_only)
 
 
 def transcribe_via_groq(original: Path, model_name: str) -> dict:
@@ -73,16 +83,15 @@ def transcribe_audio(original: Path, metadata: dict) -> dict:
         return {"status": "not_configured", "text": None,
                 "note": "Set TE_GROQ_ASR_MODEL and TE_GROQ_API_KEY for cloud speech, or TE_ASR_MODEL for local Whisper."}
     try:
-        from faster_whisper import WhisperModel
         with tempfile.TemporaryDirectory() as temp:
             wav = Path(temp) / "speech.wav"
             subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                             "-i", str(original), "-vn", "-ac", "1",
                             "-ar", "16000", str(wav)], check=True, capture_output=True, timeout=65)
-            model = WhisperModel(model_name,
-                                 device=os.getenv("TE_ASR_DEVICE", "cpu"),
-                                 compute_type=os.getenv("TE_ASR_COMPUTE_TYPE", "int8"),
-                                 local_files_only=os.getenv("TE_ASR_ALLOW_DOWNLOAD", "0") != "1")
+            model = loaded_whisper_model(model_name,
+                                         os.getenv("TE_ASR_DEVICE", "cpu"),
+                                         os.getenv("TE_ASR_COMPUTE_TYPE", "int8"),
+                                         os.getenv("TE_ASR_ALLOW_DOWNLOAD", "0") != "1")
             segments, info = model.transcribe(str(wav), beam_size=3,
                                                vad_filter=True)
             parts = []
