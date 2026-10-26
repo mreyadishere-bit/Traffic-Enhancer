@@ -2,6 +2,8 @@
 
 # Traffic Enhancer
 
+**Seeing missing AI modules?** [Fix Vehicle Detection and Speech Transcription with the Windows AI launcher](docs/FIX_LOCAL_AI.md). On localhost the login screen is not needed.
+
 **Turning Every Drive into an Opportunity for Safer Roads.**
 
 An early-stage road evidence platform. The first **runnable web vertical slice** accepts real dashcam videos, checks file integrity, extracts an actual frame using FFmpeg, optionally runs YOLO/BoT-SORT video tracking, speech transcription, Qwen2.5-VL visual analysis and plate OCR when the required models are configured, and produces a preliminary PDF report.

@@ -4,9 +4,17 @@ When model weights aren't configured, never return synthetic detections/IDs.
 Track IDs are local to ONE video, and can switch after occlusion.
 """
 import os
+from functools import lru_cache
 
 
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "motorbike"}
+
+
+@lru_cache(maxsize=2)
+def loaded_vehicle_model(weights: str):
+    """Load detector weights once per backend process, not once per incident."""
+    from ultralytics import YOLO
+    return YOLO(weights)
 
 
 def track_vehicles(video, video_metadata: dict) -> dict:
@@ -15,8 +23,7 @@ def track_vehicles(video, video_metadata: dict) -> dict:
         return {"status": "not_configured", "model": None, "tracks": [],
                 "detections": [], "note": "Set TE_YOLO_MODEL for actual video tracking."}
     try:
-        from ultralytics import YOLO
-        model = YOLO(weights)
+        model = loaded_vehicle_model(weights)
         max_frames = min(180, max(1, int(os.getenv("TE_TRACK_MAX_FRAMES", "90"))))
         stride = min(30, max(1, int(os.getenv("TE_TRACK_STRIDE", "5"))))
         fps = float(video_metadata.get("frame_rate") or 0)
