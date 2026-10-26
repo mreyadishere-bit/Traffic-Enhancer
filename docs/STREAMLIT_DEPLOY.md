@@ -53,9 +53,15 @@ Windows, GitHub Codespaces, Render, Blitz or a manually running FastAPI port.
   permanent file/database vault. The app can go to sleep or restart at any
   time, wiping local SQLite/video files. **Do not upload sensitive third-party
   footage or rely on this deployment for evidence preservation.**
-- Video uploads are capped at 70 MB by the app; select at most 180 seconds.
-  The entire uploaded source still crosses the network; slower connections
-  may need a smaller source copy.
+- Video uploads are capped at 70 MB by the app. The uploader first transfers
+  the source and FFprobe reads its duration; only then do the optional trim
+  controls appear. The upload may take time on slow connections.
+- **Optional clip trim:** use the two-handle timeline or exact START/END
+  numeric inputs to select any 1–180-second interval; the Streamlit preview
+  starts and stops at the chosen timestamps when the browser can play MP4.
+  Alternatively choose the full video if its duration is at most 180 seconds.
+  The backend keeps the original source and trims accurately with FFmpeg.
+  For large recordings, upload a smaller source copy for faster transfers.
 - Public no-password demo. Each browser session sees only cases it created,
   not the shared backend's global case index. This is NOT a private vault;
   temporary files are still held on the shared server and can disappear.

@@ -54,3 +54,15 @@ def test_visitors_do_not_need_any_password_secret(tmp_path, monkeypatch):
     assert not app.exception, [str(x.message) for x in app.exception]
     assert not app.text_input
     assert app.radio and "Overview" in app.radio[0].options
+
+
+
+def test_new_analysis_explains_trim_even_before_upload(tmp_path, monkeypatch):
+    prepare(tmp_path, monkeypatch)
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception, [str(e.message) for e in app.exception]
+    app.radio[0].set_value("New analysis").run()
+    assert not app.exception, [str(e.message) for e in app.exception]
+    labels = [str(x.value) for x in app.markdown]
+    assert any("Optional clip trimming" in x for x in labels)
+    assert any("full" in str(x.value).lower() or "Choose a video" in str(x.value) for x in app.info)
