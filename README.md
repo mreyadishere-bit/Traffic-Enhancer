@@ -1,4 +1,4 @@
-[Launch from GitHub Codespaces](https://codespaces.new/mreyadishere-bit/Traffic-Enhancer?quickstart=1) · [One-click launcher and deployment guide](docs/QUICK_START_GITHUB.md)
+[**Open Traffic Enhancer from GitHub — no CMD**](https://codespaces.new/mreyadishere-bit/Traffic-Enhancer?quickstart=1) · [**How to add GitHub Codespaces API secrets**](docs/GITHUB_ONLY_SETUP.md) · [Windows setup](docs/QUICK_START_GITHUB.md)
 
 # Traffic Enhancer
 
