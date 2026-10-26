@@ -150,6 +150,9 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
 
     if not api_base.startswith(("https://", "http://localhost:", "http://127.0.0.1:")):
         raise ValueError("Remote AI API must use HTTPS or a loopback HTTP endpoint")
+    if not os.getenv("TE_QWEN_API_KEY", "").strip():
+        return {"status": "not_configured", "model": model_id,
+                "observations": None, "note": "Set TE_QWEN_API_KEY in host environment."}
     with tempfile.TemporaryDirectory() as temp:
         frames = _capture_samples(original, Path(temp), duration)
         if not frames:
