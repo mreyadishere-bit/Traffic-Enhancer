@@ -1,0 +1,33 @@
+name: Validate Streamlit Community Cloud
+on:
+  pull_request:
+    paths:
+      - "streamlit_app.py"
+      - "services/api/**"
+      - "requirements.txt"
+      - "tests/test_streamlit_cloud.py"
+      - ".streamlit/**"
+      - "packages.txt"
+      - ".github/workflows/streamlit-cloud.yml"
+  workflow_dispatch:
+concurrency:
+  group: streamlit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  streamlit-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Syntax check and Streamlit AppTest
+        run: |
+          python -m compileall -q streamlit_app.py
+          python -m pytest -q tests/test_streamlit_cloud.py
