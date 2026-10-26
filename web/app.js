@@ -1,7 +1,7 @@
 "use strict";
 // Operator key lives in memory only. This is a single-operator dev MVP.
 const el=id=>document.getElementById(id);
-let key="",items=[],selected=null,mediaUrl=null,currentFile=null,poll=null,toastTimer=null;
+let key="",accessReady=false,localAccess=false,items=[],selected=null,mediaUrl=null,currentFile=null,poll=null,toastTimer=null;
 let previewObjectUrl=null,trimDuration=null,trimStart=0,trimEnd=0,trimReady=false;
 const trimFormat=s=>{const seconds=Math.floor(Number(s)||0);return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")};
 const MAX_SEGMENT=180;
@@ -10,18 +10,18 @@ const mb=n=>(Number(n)/1024/1024).toFixed(1)+" MB";
 el("today").textContent=new Date().toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric"}).toUpperCase();
 function toast(message){el("toast").textContent=message;el("toast").classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>el("toast").classList.remove("show"),5000)}
 async function api(path,opts={}){
- const res=await fetch("/api/v1"+path,{...opts,headers:{Authorization:"Bearer "+key,...(opts.headers||{})}});
+ const res=await fetch("/api/v1"+path,{...opts,headers:{...(key?{Authorization:"Bearer "+key}:{}),...(opts.headers||{})}});
  if(!res.ok){let msg="Request failed ("+res.status+")";try{let x=await res.json();if(typeof x.detail==="string")msg=x.detail}catch{}throw Error(msg)}
  return res;
 }
 el("loginForm").addEventListener("submit",async e=>{
  e.preventDefault();key=el("key").value;el("loginError").textContent="";
- try{const r=await api("/incidents");items=(await r.json()).items;el("overlay").classList.add("hidden");el("key").value="";render();refreshLoop();const caps=(await(await api("/capabilities")).json());if(!caps.qwen.configured)toast("Qwen2.5-VL is not configured on this backend. See docs/AI_RUNTIME.md.");}catch(error){key="";el("loginError").textContent=error.message==="Invalid operator key"?"Invalid key for this running server. Use the key shown in your Windows launcher or .traffic-local-key, or the key configured as TE_API_KEY.":error.message}
+ try{const r=await api("/incidents");items=(await r.json()).items;accessReady=true;el("overlay").classList.add("hidden");el("key").value="";render();refreshLoop();const caps=(await(await api("/capabilities")).json());if(!caps.qwen.configured)toast("Qwen2.5-VL is not configured on this backend. See docs/AI_RUNTIME.md.");}catch(error){key="";accessReady=false;el("loginError").textContent=error.message==="Invalid operator key"?"Invalid key for this running server. Use the operator key configured as TE_API_KEY.":error.message}
 });
-el("disconnect").addEventListener("click",()=>{key="";items=[];selected=null;if(poll)clearInterval(poll);clearMedia();render();el("overlay").classList.remove("hidden")});
+el("disconnect").addEventListener("click",()=>{if(localAccess)return;key="";accessReady=false;items=[];selected=null;if(poll)clearInterval(poll);clearMedia();render();el("overlay").classList.remove("hidden")});
 function refreshLoop(){if(poll)clearInterval(poll);poll=setInterval(()=>{if(items.some(x=>["queued","processing"].includes(x.status)))refresh()},3000)}
 async function refresh(){
- if(!key)return;
+ if(!accessReady)return;
  try{
    const previousStatus=selected?.status;
    items=(await(await api("/incidents")).json()).items;
@@ -35,6 +35,26 @@ async function refresh(){
    }
  }catch(e){toast("Refresh failed: "+e.message)}
 }
+// Direct Windows localhost access starts immediately without a login screen.
+// Any hosted URL (including private GitHub Codespaces) retains its operator key.
+async function bootLocalWorkspace(){
+ try{
+  const resp=await fetch("/api/v1/session",{cache:"no-store"});
+  if(!resp.ok)return;
+  const session=await resp.json();
+  if(session.login_required!==false)return;
+  localAccess=true;
+  const data=await(await api("/incidents")).json();
+  items=data.items;
+  accessReady=true;
+  el("overlay").classList.add("hidden");
+  el("disconnect").hidden=true;
+  render();
+  refreshLoop();
+ }catch(error){console.warn("Automatic local workspace setup failed:",error)}
+}
+bootLocalWorkspace();
+
 el("refresh").addEventListener("click",refresh);
 el("newIncident").addEventListener("click",()=>{el("studio").scrollIntoView({behavior:"smooth"});el("video").click()});
 const drop=el("drop"),upload=el("video");
@@ -141,8 +161,8 @@ el("trimEnd").addEventListener("input",e=>setTrimBounds("end",e.target.value));
 el("trimStartNumber").addEventListener("change",e=>setTrimBounds("start",e.target.value));
 el("trimEndNumber").addEventListener("change",e=>setTrimBounds("end",e.target.value));
 el("upload").addEventListener("click",()=>{
- if(!currentFile||!key)return;
- const xhr=new XMLHttpRequest();xhr.open("POST","/api/v1/incidents");xhr.setRequestHeader("Authorization","Bearer "+key);
+ if(!currentFile||!accessReady)return;
+ const xhr=new XMLHttpRequest();xhr.open("POST","/api/v1/incidents");if(key)xhr.setRequestHeader("Authorization","Bearer "+key);
  const data=new FormData();data.append("video",currentFile,currentFile.name);
  const full=Number.isFinite(trimDuration)&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11;
  if(!full){data.append("start_seconds",String(trimStart));data.append("end_seconds",String(trimEnd))}

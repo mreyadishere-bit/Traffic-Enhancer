@@ -87,3 +87,7 @@ Mobile source: [apps/mobile](apps/mobile/README.md). Read [system architecture](
 ## Open from GitHub automatically
 
 Codespaces now auto-starts the **private** preview app. Each push runs both CI and an automatic Windows launcher ZIP package in GitHub Actions. See [Quick start from GitHub](docs/QUICK_START_GITHUB.md). GitHub Pages cannot host this Python + AI backend, so production deployment remains separate.
+
+## Local development: no password screen
+
+When opened directly at `http://127.0.0.1:8000` or `http://localhost:8000` on the same computer, Traffic Enhancer now opens the workspace **without an API operator key**. This bypass is restricted to direct loopback requests in development, and rejects proxied/forwarded or cross-origin traffic. Start as usual with `python -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload`. If the browser is using a forwarded GitHub Codespaces URL or any online deployment, the login and `TE_API_KEY` remain mandatory. For stricter local auth, set `TE_LOCAL_NO_AUTH=0`. Never expose the development server on the public internet.

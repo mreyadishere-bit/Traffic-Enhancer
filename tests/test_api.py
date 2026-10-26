@@ -132,3 +132,60 @@ def test_invalid_trim_bounds_do_not_save_evidence(client, tmp_path):
        files={"video":("clip.mp4",file.read_bytes(),"video/mp4")})
     assert response.status_code == 422
     assert not list(main.EVIDENCE.iterdir())
+
+
+
+def test_local_browser_requires_direct_loopback_only(monkeypatch):
+    from starlette.requests import Request
+
+    def req(ip="127.0.0.1", host="127.0.0.1:8000", **headers):
+        pairs=[(b"host",host.encode())]
+        pairs += [(name.replace("_","-").encode(),str(value).encode())
+                  for name,value in headers.items()]
+        scope={"type":"http","http_version":"1.1","method":"GET","scheme":"http",
+               "path":"/api/v1/incidents","headers":pairs,
+               "client":(ip,40000),"server":("127.0.0.1",8000)}
+        return Request(scope)
+
+    monkeypatch.setenv("TE_ENV","development")
+    monkeypatch.setenv("TE_LOCAL_NO_AUTH","1")
+    allowed=req()
+    assert main.local_browser_mode(allowed) is True
+    assert main.authorize(allowed) is None
+    assert main.session(allowed)=={"login_required":False}
+    assert main.local_browser_mode(req(host="localhost:8000"))
+    assert not main.local_browser_mode(req(ip="192.168.1.5"))
+    assert not main.local_browser_mode(req(host="app.github.dev"))
+    assert not main.local_browser_mode(req(x_forwarded_for="8.8.8.8"))
+    assert not main.local_browser_mode(req(origin="https://malicious.example"))
+    assert not main.local_browser_mode(req(sec_fetch_site="cross-site"))
+    monkeypatch.setenv("TE_ENV","production")
+    assert not main.local_browser_mode(req())
+    monkeypatch.setenv("TE_ENV","development")
+    monkeypatch.setenv("TE_LOCAL_NO_AUTH","0")
+    assert not main.local_browser_mode(req())
+
+
+
+def test_real_fastapi_local_session_without_password(tmp_path, monkeypatch):
+    """A browser connecting directly to loopback gets the app, not the login page."""
+    monkeypatch.setenv("TE_ENV", "development")
+    monkeypatch.setenv("TE_LOCAL_NO_AUTH", "1")
+    monkeypatch.setattr(main, "DATA", tmp_path)
+    monkeypatch.setattr(main, "DB", tmp_path / "traffic.db")
+    monkeypatch.setattr(main, "EVIDENCE", tmp_path / "evidence")
+    monkeypatch.setattr(main, "DERIVED", tmp_path / "derived")
+    with TestClient(main.app, base_url="http://127.0.0.1:8000",
+                    client=("127.0.0.1", 50001)) as browser:
+        assert browser.get("/api/v1/session").json() == {"login_required": False}
+        assert browser.get("/api/v1/incidents").status_code == 200
+        assert browser.get("/api/v1/capabilities").status_code == 200
+        # Cross-site requests cannot use the local no-password exception.
+        assert browser.get("/api/v1/incidents",
+                           headers={"Origin": "https://unsafe.example"}).status_code == 401
+        assert browser.get("/api/v1/incidents",
+                           headers={"X-Forwarded-For": "5.6.7.8"}).status_code == 401
+    with TestClient(main.app, base_url="https://my-codespace-8000.app.github.dev",
+                    client=("127.0.0.1", 50001)) as proxy:
+        assert proxy.get("/api/v1/session").json() == {"login_required": True}
+        assert proxy.get("/api/v1/incidents").status_code == 401
