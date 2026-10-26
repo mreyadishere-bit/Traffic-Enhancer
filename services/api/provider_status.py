@@ -35,6 +35,8 @@ def provider_failure(provider: str, error: Exception) -> str:
         return f"{provider} HTTP {code}: inference request rejected. Check provider status."
     if isinstance(error, httpx.TimeoutException):
         return f"{provider} request timed out. Try a short clip if the service is available."
+    if isinstance(error, ValueError) and "HTTPS" in str(error):
+        return f"{provider}: the remote API endpoint must use HTTPS (or local loopback HTTP)."
     return f"{provider} {type(error).__name__}: request failed; review provider settings."
 
 
