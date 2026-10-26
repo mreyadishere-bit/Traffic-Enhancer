@@ -20,6 +20,11 @@ const assert = require("node:assert/strict");
     await page.locator("#nCases").waitFor();
     assert.equal(await page.locator("#nCases").textContent(),"0");
     await page.locator("#file").setInputFiles("tests/e2e-demo.mp4");
+    console.log("Browser video duration:",await page.locator("#trimVideo").evaluate(node=>node.duration));
+    // Chromium may not include an H.264 decoder. The manual fallback
+    // must remain usable without inventing a video's duration.
+    await page.locator("#endSec").fill("2");
+    await page.locator("#endSec").dispatchEvent("input");
     await page.waitForFunction(()=>!document.querySelector("#upload").disabled,null,{timeout:12000});
     await page.locator("#uploadClaim").fill("Take photo, blue Kia on the left shoulder");
     const requestPromise=page.waitForResponse(resp=>resp.url().endsWith("/api/v1/incidents") && resp.request().method()==="POST",{timeout:40000});

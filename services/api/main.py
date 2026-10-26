@@ -294,7 +294,7 @@ async def upload_incident(
             # Browser metadata may be rounded by a few video-frame periods.
             # Permit a small discrepancy, then clamp to probed source duration.
             if start_seconds < 0 or end_seconds <= start_seconds or end_seconds > duration + 0.5:
-                raise HTTPException(422, "Trim bounds must be inside the source recording")
+                raise HTTPException(422, f"Selected clip end ({end_seconds:.2f}s) exceeds the source duration ({duration:.2f}s), or the start is invalid")
             if min(duration, end_seconds) - start_seconds < 1 or end_seconds - start_seconds > 180:
                 raise HTTPException(422, "Selected segment must be 1–180 seconds")
             trim_evidence(original, output, start_seconds, min(duration, end_seconds))

@@ -2,7 +2,7 @@
 /* Traffic Enhancer evidence studio — real API data, no simulated cases. */
 const $ = id => document.getElementById(id);
 let operatorKey = "", cases = [], selected = null, activeTrackId = null;
-let mediaUrl = null, importUrl = null, chosen = null, sourceDuration = null;
+let mediaUrl = null, importUrl = null, chosen = null, sourceDuration = null, manualBounds = false;
 let refreshTimer = null, toastTimer = null, activePreviewId = null, connecting = false;
 const video = $("caseVideo"), canvas = $("trackCanvas");
 const clamp = (x,min,max) => Math.min(max,Math.max(min,x));
@@ -151,7 +151,7 @@ file.onchange=()=>{if(file.files[0])chooseFile(file.files[0])};
 function chooseFile(picked){
   if(!/\.(mp4|mov|mkv)$/i.test(picked.name)){notice("Choose an MP4, MOV or MKV file.");return}
   if(picked.size>512*1024*1024){notice("Source video exceeds 512 MB.");return}
-  chosen=picked;sourceDuration=null;
+  chosen=picked;sourceDuration=null;manualBounds=false;
   if(importUrl)URL.revokeObjectURL(importUrl);
   importUrl=URL.createObjectURL(picked);importPreview.src=importUrl;
   $("filename").textContent=picked.name;
@@ -162,6 +162,7 @@ importPreview.onloadedmetadata=()=>{
   sourceDuration=importPreview.duration;
   if(!Number.isFinite(sourceDuration)||sourceDuration<1){sourceDuration=null;return}
   $("startSec").value=0;
+  manualBounds=false;
   // MP4 browsers can report a rounded timeline slightly longer than FFprobe.
   // Leave a small safety margin; server will still verify the actual source.
   const last=Math.min(20,Math.max(1,Math.floor((sourceDuration-.35)*10)/10));
@@ -176,14 +177,18 @@ importPreview.onerror=()=>{
 };
 importPreview.ontimeupdate=()=>{$("trimSeek").value=String(importPreview.currentTime)};
 $("trimSeek").oninput=e=>{try{importPreview.currentTime=Number(e.target.value)}catch{}};
-$("startSec").oninput=validateTrim;$("endSec").oninput=validateTrim;
+$("startSec").oninput=()=>{manualBounds=true;validateTrim()};
+$("endSec").oninput=()=>{manualBounds=true;validateTrim()};
 function validateTrim(){
   if(!chosen){$("upload").disabled=true;return false}
   const start=Number($("startSec").value),end=Number($("endSec").value);
   const valid=Number.isFinite(start)&&Number.isFinite(end)&&start>=0&&end-start>=1
-    &&end-start<=180&&end<=7200&&(sourceDuration===null||end<=sourceDuration+.1);
+    &&end-start<=180&&end<=7200&&(sourceDuration===null||end<=sourceDuration+.1)
+    &&(sourceDuration!==null||manualBounds);
   $("upload").disabled=!valid;
-  if(!valid)$("uploadStatus").textContent="Select a valid 1–180 second segment.";
+  if(!valid)$("uploadStatus").textContent=sourceDuration===null&&!manualBounds?
+    "Preview unavailable: enter start and end seconds manually before uploading.":
+    "Select a valid 1–180 second segment.";
   else $("uploadStatus").textContent="Selected "+(end-start).toFixed(1)+"s · Original recording preserved.";
   return valid;
 }
