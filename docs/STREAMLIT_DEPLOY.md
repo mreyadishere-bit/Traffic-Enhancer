@@ -16,7 +16,6 @@ FastAPI/FFmpeg analysis pipeline without running a separate publicly exposed API
 5. In **Advanced settings → Secrets**, paste TOML values like:
 
 ~~~toml
-TE_API_KEY = "REPLACE_WITH_NEW_LONG_RANDOM_PRIVATE_PASSWORD"
 TE_QWEN_API_KEY = "REPLACE_WITH_NEW_OPENROUTER_KEY"
 TE_QWEN_API_BASE = "https://openrouter.ai/api/v1"
 TE_QWEN_MODEL = "qwen/qwen-2.5-vl-7b-instruct:free"
@@ -27,14 +26,15 @@ TE_GROQ_ASR_MODEL = "whisper-large-v3-turbo"
 
 All values above are **examples, not usable secrets**. Create fresh keys:
 [OpenRouter keys](https://openrouter.ai/settings/keys) and
-[Groq keys](https://console.groq.com/keys). Keys previously shared in chat
-screenshots must be revoked. Your Streamlit operator password is unrelated
-to either provider's API key, and must be at least 16 characters.
+[Groq keys](https://console.groq.com/keys). Keys previously shared in chat screenshots must be revoked.
+No visitor password or TE_API_KEY is required in Streamlit. The server generates
+its own random internal FastAPI key. An existing TE_API_KEY in Streamlit secrets
+can be deleted without affecting the public demo.
 You can omit the Groq or OpenRouter credentials to disable that stage.
 Never commit \`.streamlit/secrets.toml\` or put secrets in frontend code.
 
-6. Click **Deploy**, then visit the **actual URL Streamlit gives you**.
-   Sign into the app with the private \`TE_API_KEY\` from your Streamlit secrets.
+6. Click **Deploy** and visit the resulting Streamlit URL. The app opens
+   immediately with **no login or password prompt**.
 
 ### Updates without manual deployment
 
@@ -56,9 +56,13 @@ Windows, GitHub Codespaces, Render, Blitz or a manually running FastAPI port.
 - Video uploads are capped at 70 MB by the app; select at most 180 seconds.
   The entire uploaded source still crosses the network; slower connections
   may need a smaller source copy.
-- One shared password protects the dashboard; this is not secure multi-user
-  authentication, case access policies, durable processing queues, or legal
-  traffic enforcement.
+- Public no-password demo. Each browser session sees only cases it created,
+  not the shared backend's global case index. This is NOT a private vault;
+  temporary files are still held on the shared server and can disappear.
+  Upload only nonsensitive videos; browser sessions can lose case links.
+- Anonymous access can consume your API quota. The app limits analyses to
+  four per session and 20 per 24 hours per app process, but these are not
+  a substitute for production rate-limiting and authenticated case storage.
 - No official plate registry or government traffic system is connected.
   Suggested events are unverified.
 
