@@ -65,4 +65,4 @@ def test_new_analysis_explains_trim_even_before_upload(tmp_path, monkeypatch):
     assert not app.exception, [str(e.message) for e in app.exception]
     labels = [str(x.value) for x in app.markdown]
     assert any("Optional clip trimming" in x for x in labels)
-    assert any("full" in str(x.message).lower() or "Choose a video" in str(x.message) for x in app.info)
+    assert any("full" in str(x.value).lower() or "Choose a video" in str(x.value) for x in app.info)
