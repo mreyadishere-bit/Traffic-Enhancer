@@ -16,7 +16,7 @@ Never upload sensitive or identifying recordings without the necessary consent/a
 3. Create a free Render account at https://dashboard.render.com .
 4. Connect Render to **your GitHub** account (this is required for automatic deploys).
 5. Open https://dashboard.render.com/select-repo?type=blueprint or choose **New → Blueprint**.
-   Select `mreyadishere-bit/Traffic-Enhancer` and use its root `render.yaml`.
+   Select `mreyadishere-bit/Traffic-Enhancer` and use its root `render.yaml`. Or open the [one-click deploy link](https://render.com/deploy?repo=https://github.com/mreyadishere-bit/Traffic-Enhancer).
    The configured branch is `main`; merge the tested feature PR first.
 6. When Render requests `TE_QWEN_API_KEY`, paste your OpenRouter key into the **Render
    secret form only**. Do not commit the key, put it into HTML, or share it in chat.
@@ -46,3 +46,24 @@ For genuine use with road evidence and third-party footage:
 An existing VPS may be suitable for lightweight web hosting, but do **not** modify
 Caddy, Supabase, ports 80/443 or other services without an authorized separate
 deployment plan. The blueprint deploys outside the existing VPS.
+
+## Optional cloud speech recognition
+
+If the recording includes real audio, the cloud demo can use Groq-hosted Whisper.
+Create an API key at https://console.groq.com/keys and add it to Render **Environment**
+as `TE_GROQ_API_KEY`. The Blueprint sets `TE_GROQ_ASR_MODEL=whisper-large-v3-turbo`.
+Your selected clip audio will be sent to Groq after explicit operator configuration.
+The Groq free tier has file-size and request limits (see their documentation), and
+not every recording produces an intelligible transcript. Do not send third-party
+audio without authorization.
+
+If no key is configured, the speech stage is displayed as not configured and
+the operator can manually enter a driver statement, explicitly labeled as a claim.
+
+## What counts as successfully deployed?
+
+The Render service must show **Live**, the health endpoint must return 200, the operator
+key must authorize API calls, a short nonsensitive test clip must upload/process,
+the Qwen stage must return a genuine `completed` result (not `not_configured`),
+and the PDF must export. Until this happens, code/CI completion does not imply a
+running internet-accessible production system.
