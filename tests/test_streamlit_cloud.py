@@ -36,5 +36,5 @@ def test_missing_secret_fails_closed(monkeypatch):
     app=AppTest.from_file(APP,default_timeout=30)
     app.run()
     assert not app.exception, [str(x.message) for x in app.exception]
-    assert any("locked" in str(x.message).lower() for x in app.error)
+    assert any("locked" in str(x.value).lower() for x in app.error)
     assert not app.radio
