@@ -30,4 +30,4 @@ jobs:
       - name: Syntax check and Streamlit AppTest
         run: |
           python -m compileall -q streamlit_app.py
-          python -m pytest -q tests/test_streamlit_cloud.py
+          python -m pytest -q tests/test_streamlit_cloud.py tests/test_provider_status.py

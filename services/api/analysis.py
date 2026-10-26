@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from .intent import parse_driver_claim
+from .provider_status import provider_failure
 from .tracker import track_vehicles
 from .qwen import describe_video
 from .plate import scan_plates
@@ -72,12 +73,9 @@ def transcribe_audio(original: Path, metadata: dict) -> dict:
         try:
             return transcribe_via_groq(original, remote_model)
         except Exception as exc:
-            # This is a diagnostic message, never expose operator credentials.
-            secret = os.getenv("TE_GROQ_API_KEY", "")
-            details = str(exc).replace(secret, "[redacted]") if secret else str(exc)
             return {"status": "failed", "text": None, "model": remote_model,
                     "provider": "groq_operator_opt_in",
-                    "note": f"{type(exc).__name__}: {details[:220]}"}
+                    "note": provider_failure("Groq", exc)}
     model_name = os.getenv("TE_ASR_MODEL", "").strip()
     if not model_name:
         return {"status": "not_configured", "text": None,
