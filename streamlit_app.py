@@ -334,9 +334,13 @@ elif area == "New analysis":
                         st.error("Choose a shorter interval or smaller source file for Cloud processing.")
                     else:
                         full=abs(start)<0.01 and end>=duration-0.11 and duration<=180
-                        st.session_state.pending_work=jobs().submit(
-                            upload_and_analyze,blob,incoming.name,start,end,full)
-                        st.rerun()
+                        if reserve_demo_analysis():
+                            st.session_state.pending_kind = "upload"
+                            st.session_state.pending_work=jobs().submit(
+                                upload_and_analyze,blob,incoming.name,start,end,full)
+                            st.rerun()
+                        else:
+                            st.warning("Public demo processing limit reached. Try later or use the local app.")
                 st.caption("Qwen and Whisper run only when you configure their secrets; GPU-based YOLO and Egyptian plate OCR are not enabled on free Community Cloud.")
 
 elif area in ("Evidence studio","Incident library"):
@@ -394,10 +398,14 @@ elif area in ("Evidence studio","Incident library"):
             stage_status(st,"Potential violation review",a.get("violation_assessment"))
             if selected["status"] in ("ready","failed"):
                 if st.button("Re-run AI analysis on this clip",use_container_width=True):
-                    st.session_state.pending_work=jobs().submit(
-                        lambda: api_request("POST",f"/incidents/{selected_id}/reanalyze",
-                                            timeout=360).json())
-                    st.rerun()
+                    if reserve_demo_analysis():
+                        st.session_state.pending_kind = "rerun"
+                        st.session_state.pending_work=jobs().submit(
+                            lambda: api_request("POST",f"/incidents/{selected_id}/reanalyze",
+                                                timeout=360).json())
+                        st.rerun()
+                    else:
+                        st.warning("Public demo processing limit reached.")
             if selected["status"]=="ready":
                 try:
                     pdf=api_request("GET",f"/incidents/{selected_id}/report.pdf").content
@@ -425,4 +433,7 @@ elif area=="System health":
             st.markdown(f"**{title}**")
             st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
     st.warning("A configured API does not guarantee requests will succeed. Free endpoints may be rate-limited, discontinued, or unable to analyze a specific incident.")
-    st.info("Community Cloud may put the app to sleep and its local database/videos can disappear across restarts. Use only authorized, non-sensitive recordings. No government verification or permanent evidence vault is included.")
+    st.info("This no-password demo shows only the current browser session's cases, but "
+            "files still live in temporary shared server storage. They are not encrypted "
+            "or permanently preserved. Anyone with the URL can consume the limited AI "
+            "quota. Upload nonsensitive videos only. No official enforcement.")
