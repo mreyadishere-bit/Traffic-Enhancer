@@ -1,77 +1,175 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1119"><meta name="description" content="Traffic Enhancer — traceable dashcam evidence analysis.">
-<title>Traffic Enhancer · Evidence Studio</title><link rel="stylesheet" href="/styles.css"><script defer src="/app.js"></script></head>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="theme-color" content="#101821"/>
+  <meta name="description" content="Traffic Enhancer — evidence-first video review for safer roads."/>
+  <title>Traffic Enhancer — Evidence Workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <script src="/app.js" defer></script>
+</head>
 <body>
-<div class="shell">
-<aside class="sidebar">
-  <a class="brand" href="/"><div class="brand-logo"><svg viewBox="0 0 44 44" fill="none" aria-hidden="true"><path d="M8 35 18 9h8l10 26" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M22 13v5m0 6v5m0 5v2" stroke="#10232a" stroke-width="3" stroke-linecap="round"/></svg></div><div>TRAFFIC <strong>ENHANCER</strong><small>INTELLIGENCE PLATFORM</small></div></a>
-  <div class="menu-label">WORKSPACE</div>
-  <nav class="nav"><a class="active" href="#overview"><span>▦</span> Overview</a><a href="#studio"><span>◈</span> AI Studio</a><a href="#incidents"><span>▤</span> Incident library</a></nav>
-  <div class="menu-label second">RESOURCES</div>
-  <nav class="nav"><a href="/docs" target="_blank" rel="noopener"><span>⌘</span> API docs ↗</a><a href="https://github.com/mreyadishere-bit/Traffic-Enhancer" target="_blank" rel="noopener"><span>⌁</span> Repository ↗</a></nav>
-  <div class="sidebar-bottom"><div class="build-pill"><span class="dot"></span> WORKING MVP <span>v0.1</span></div><p>Preliminary evidence assessments only. Not an official enforcement service.</p></div>
-</aside>
-<div class="content">
-<header class="top"><span>PLATFORM <b>/</b> <strong>Evidence Workspace</strong></span><div><span id="today"></span><span class="service"><i class="dot"></i> DEVELOPMENT SYSTEM</span><button class="link-button" id="disconnect">Disconnect</button></div></header>
-<main id="overview">
-<section class="hero"><div><div class="overline"><i></i> INTELLIGENT ROAD SAFETY</div><h1>Evidence, with <em>clarity.</em></h1><p>Transform real dashcam footage into traceable insights. Nothing assumed, nothing fabricated.</p></div><div class="hero-actions"><button class="button subtle" id="refresh">↻ Refresh</button><button class="button primary" id="newIncident">＋ New incident <span>↗</span></button></div></section>
-<section class="metrics" aria-label="Actual evidence statistics">
-  <div class="metric"><span>TOTAL INCIDENTS <b>↗</b></span><strong id="nTotal">—</strong><small>Original recordings received</small></div>
-  <div class="metric"><span>ANALYSIS READY <b>✓</b></span><strong id="nReady">—</strong><small>Preliminary reports created</small></div>
-  <div class="metric"><span>IN PROGRESS <b>◴</b></span><strong id="nPending">—</strong><small>Queued or processing</small></div>
-  <div class="metric"><span>NEEDS ATTENTION <b>!</b></span><strong id="nFailed">—</strong><small>Failed processing jobs</small></div>
-</section>
-<div class="workspace" id="studio">
-<section class="panel">
-  <div class="panel-header"><div><span class="overline">01 / EVIDENCE INTAKE</span><h2>Bring footage to life.</h2><p>Begin with an actual recording from a camera.</p></div><div class="square-icon">↑</div></div>
-  <div id="drop" class="drop" role="button" tabindex="0" aria-label="Choose dashcam video"><input type="file" id="video" accept=".mp4,.mov,.mkv" hidden>
-    <div class="cloud-icon"><svg viewBox="0 0 80 80" fill="none" aria-hidden="true"><rect x="13" y="22" width="54" height="36" rx="8" stroke="currentColor" stroke-width="1.5"/><path d="M40 57V35m0 0-8 8m8-8 8 8M25 22v-7h30v7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-    <strong id="filename">Drop dashcam footage here</strong><span>or <u>browse files</u> to get started</span><small>MP4 · MOV · MKV · Source up to 512 MB · Trim long videos</small>
+<div class="app">
+  <aside class="rail" aria-label="Workspace navigation">
+    <a class="identity" href="#overview" aria-label="Traffic Enhancer home">
+      <span class="identity-sign"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M9 27 15 7h4l6 20" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><path d="M17 10v4m0 4v3m0 4v1" stroke="#15212a" stroke-width="2.4" stroke-linecap="round"/></svg></span>
+      <span><strong>TRAFFIC</strong><b>ENHANCER</b></span>
+    </a>
+    <div class="rail-label">WORKSPACE</div>
+    <nav class="rail-links">
+      <a href="#overview" class="current"><span class="nav-icon">◫</span> Overview</a>
+      <a href="#studio"><span class="nav-icon">▷</span> Evidence studio</a>
+      <a href="#library"><span class="nav-icon">▤</span> Case library</a>
+      <a href="#settings"><span class="nav-icon">⚙</span> System health</a>
+    </nav>
+    <div class="rail-foot">
+      <div class="rail-tag"><span class="status-dot"></span> DEVELOPMENT WORKSPACE</div>
+      <p>Preliminary evidence review.<br/>Not an official traffic authority.</p>
+      <a href="https://github.com/mreyadishere-bit/Traffic-Enhancer" target="_blank" rel="noopener">View source on GitHub ↗</a>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb"><span>WORKSPACE</span><span class="slash">/</span><strong>Evidence intelligence</strong></div>
+      <div class="topright"><span id="today"></span><span class="private">PRIVATE · DEVELOPMENT</span><button id="disconnect" class="text-action">Disconnect</button></div>
+    </header>
+    <main>
+      <section id="overview" class="intro">
+        <div class="eyebrow"><span class="eyebrow-mark"></span> VIDEO EVIDENCE, MADE UNDERSTANDABLE</div>
+        <div class="intro-line">
+          <div><h1>See the full picture<span>.</span></h1>
+            <p>Understand what the footage can actually show. Review what it cannot.</p></div>
+          <button id="newCase" class="primary-btn">＋ New analysis</button>
+        </div>
+        <div class="metrics" aria-label="Real case statistics">
+          <div><span class="metric-name">CASES</span><strong id="nCases">—</strong><small>Received recordings</small></div>
+          <div><span class="metric-name">READY FOR REVIEW</span><strong id="nReady">—</strong><small>Preliminary analysis</small></div>
+          <div><span class="metric-name">PROCESSING</span><strong id="nPending">—</strong><small>Waiting or running</small></div>
+          <div><span class="metric-name">REQUIRES ATTENTION</span><strong id="nFailed">—</strong><small>Processing errors</small></div>
+        </div>
+      </section>
+
+      <section id="intake" class="intake" aria-labelledby="uploadTitle">
+        <div class="section-cap"><span>01</span> NEW ANALYSIS <button id="closeIntake" class="quiet-btn" aria-label="Close import panel">✕</button></div>
+        <div class="intake-grid">
+          <div><h2 id="uploadTitle">Start with the source.</h2><p class="muted">Drop in real dashcam footage. We'll preserve it, then analyze your chosen segment.</p>
+            <div id="drop" class="drop" role="button" tabindex="0" aria-label="Choose or drop dashcam video">
+              <input id="file" type="file" accept=".mp4,.mov,.mkv" hidden/>
+              <span class="drop-icon">↑</span><strong id="filename">Choose a recording</strong>
+              <small>Drop video here or click to browse · MP4, MOV, MKV · maximum source 512 MB</small>
+            </div>
+          </div>
+          <div class="intake-advanced">
+            <video id="trimVideo" controls playsinline preload="metadata" aria-label="Source video preview"></video>
+            <p id="trimHelp" class="support-text">Choose a file to preview and select your segment.</p>
+            <div class="trim-inputs">
+              <label>START (SECONDS)<input id="startSec" type="number" min="0" step=".1" value="0"/></label>
+              <label>END (SECONDS)<input id="endSec" type="number" min="1" step=".1" value="20"/></label>
+            </div>
+            <input id="trimSeek" type="range" min="0" max="20" step=".1" value="0" aria-label="Preview video position"/>
+            <label class="field-label" for="uploadClaim">WHAT DID THE DRIVER NOTICE? <span>optional</span></label>
+            <textarea id="uploadClaim" rows="2" maxlength="500" placeholder="e.g. Take photo, blue Kia on the left shoulder. Arabic is supported."></textarea>
+            <button id="upload" class="primary-btn full" disabled>Analyze selected segment <span>↗</span></button>
+            <div class="track-progress" id="progress" hidden><div id="progressBar"></div></div>
+            <p id="uploadStatus" class="support-text" role="status">Segments must be 1–180 seconds. Original media is preserved.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="studio" class="studio-section">
+        <div class="section-title"><div><div class="section-cap"><span>02</span> EVIDENCE STUDIO</div><h2>Inspect the moment.</h2></div><p id="selectedId" class="section-meta">NO CASE SELECTED</p></div>
+        <div class="studio-layout">
+          <div class="studio-main">
+            <div class="viewer-toolbar">
+              <div><span class="viewer-dot"></span><strong id="currentCaseTitle">No recording selected</strong></div>
+              <div class="view-options">
+                <label><input id="overlayToggle" type="checkbox" checked/> Selected track</label>
+                <label title="Show all objects only while debugging"><input id="debugToggle" type="checkbox"/> All tracks (debug)</label>
+              </div>
+            </div>
+            <div class="player" id="playerContainer">
+              <div id="playerEmpty" class="player-empty"><span class="empty-orbit">▷</span><strong>Your footage belongs here.</strong><p>Select a case from your library or begin a new analysis.</p></div>
+              <video id="caseVideo" playsinline preload="metadata" hidden></video>
+              <canvas id="trackCanvas" aria-hidden="true"></canvas>
+              <div class="video-pill" id="videoPill" hidden>RAW FOOTAGE · REVIEW MODE</div>
+            </div>
+            <div class="player-controls">
+              <button id="play" title="Play or pause" disabled>▶</button>
+              <button id="back" title="Step back ~one frame" disabled>‹</button>
+              <button id="forward" title="Step forward ~one frame" disabled>›</button>
+              <span id="timecode">00:00 / 00:00</span>
+              <div class="time-track">
+                <input id="seek" type="range" min="0" max="1000" value="0" disabled aria-label="Recording timeline"/>
+                <div id="markers" class="timeline-markers" aria-hidden="true"></div>
+              </div>
+              <button id="evidenceSource" class="secondary-btn" disabled>Original ↓</button>
+            </div>
+            <div class="frame-context"><span>Evidence source: uploaded original</span><span id="sourceTime">Timestamps: relative to selected clip</span></div>
+
+            <div class="track-section">
+              <div class="subheading"><h3>Vehicles of interest</h3><span>Track IDs are provisional and may change</span></div>
+              <div id="trackList" class="track-list"><p class="placeholder">Vehicle tracks appear after a configured detector runs.</p></div>
+            </div>
+
+            <div class="evidence-section">
+              <div class="subheading"><h3>Evidence & observations</h3><span>Generated findings require human verification</span></div>
+              <div id="eventList" class="events"><p class="placeholder">No confirmed event is available.</p></div>
+            </div>
+          </div>
+          <aside class="inspector" aria-label="Analysis and case reviewer">
+            <div class="inspector-head"><span class="tiny-label">CASE REVIEW</span><span id="caseState" class="review-tag">NOT SELECTED</span></div>
+            <h3 id="caseHeading">An evidence-first assessment.</h3><p id="caseIntro">Select a recording to view its details and processing results.</p>
+            <div class="inspector-divider"></div>
+            <div class="section-cap inspector-cap">ANALYSIS PIPELINE</div>
+            <div id="stageList" class="stage-list"><p class="placeholder">No model results yet.</p></div>
+            <div class="inspector-divider"></div>
+            <div class="section-cap inspector-cap">REVIEWER NOTES</div>
+            <label class="field-label" for="reviewClaim">Driver statement / your description</label>
+            <textarea id="reviewClaim" rows="3" maxlength="500" placeholder="Add what the driver reported. This is a claim, not evidence."></textarea>
+            <label class="field-label" for="reviewEventSecond">Relevant moment (clip seconds)</label>
+            <input id="reviewEventSecond" type="number" min="0" step=".1" placeholder="e.g. 12.5"/>
+            <label class="field-label" for="reviewNote">Notes for the reviewer</label>
+            <textarea id="reviewNote" rows="3" maxlength="1000" placeholder="What is visible, uncertain or missing?"></textarea>
+            <label class="field-label" for="reviewStatus">Review outcome</label>
+            <select id="reviewStatus"><option value="unreviewed">Unreviewed</option><option value="needs_review">Needs further review</option><option value="reviewed_no_conclusion">Reviewed — insufficient to conclude</option></select>
+            <div class="inspector-actions"><button id="saveReview" class="secondary-btn" disabled>Save review</button><button id="reanalyze" class="secondary-btn" disabled>Re-analyze ↻</button></div>
+            <button id="report" class="primary-btn full" disabled>Export evidence report ↓</button>
+            <p id="reviewHelp" class="support-text">No automated enforcement decisions. Never treat AI suggestions as proven offenses.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="library" class="library">
+        <div class="section-title"><div><div class="section-cap"><span>03</span> CASE LIBRARY</div><h2>Every recording, traceable.</h2></div>
+          <div class="library-tools"><input id="search" type="search" placeholder="Search by filename or case ID" aria-label="Search cases"/><select id="statusFilter" aria-label="Filter cases"><option value="all">All statuses</option><option value="ready">Ready</option><option value="processing">Processing</option><option value="queued">Queued</option><option value="failed">Failed</option></select><button id="refresh" class="secondary-btn">↻ Refresh</button></div></div>
+        <div id="caseList" class="case-list"><p class="placeholder">Sign in to see your cases.</p></div>
+      </section>
+
+      <section id="settings" class="settings">
+        <div class="section-cap"><span>04</span> SYSTEM HEALTH</div><h2>Know what is actually running.</h2>
+        <div id="capabilities" class="capabilities"><p class="placeholder">Capabilities load when connected to your local API.</p></div>
+        <p class="settings-footnote">Model configuration is not proof of model accuracy. Hardware integrations and legal verification are independently assessed.</p>
+      </section>
+      <footer class="footer"><span>TRAFFIC ENHANCER · EVIDENCE WORKSPACE</span><span>PRIVATE DEVELOPMENT TOOL · HUMAN REVIEW REQUIRED</span></footer>
+    </main>
   </div>
-  <section class="trim-panel" id="trimPanel" hidden aria-label="Select the video section to analyze">
-    <div class="trim-head">
-      <div><span class="overline">SELECT VIDEO SEGMENT</span><h3>Choose exactly what to analyze.</h3></div>
-      <span class="trim-limit">1–180s per report</span>
-    </div>
-    <video id="trimPreview" controls playsinline preload="metadata" aria-label="Recording preview"></video>
-    <div class="trim-fallback" id="trimFallback" hidden>This browser cannot preview this file. You can still enter the start and end in seconds below; the server will verify and trim the footage.</div>
-    <div class="trim-readout">
-      <span id="sourceLength">Loading duration…</span>
-      <strong id="trimLength">Choose a segment</strong>
-    </div>
-    <div class="trim-control">
-      <label for="trimStart">START <span id="startLabel">0:00</span></label>
-      <input id="trimStart" type="range" min="0" max="20" step="0.1" value="0" aria-label="Start time"/>
-      <label for="trimEnd">END <span id="endLabel">0:20</span></label>
-      <input id="trimEnd" type="range" min="1" max="20" step="0.1" value="20" aria-label="End time"/>
-    </div>
-    <div class="trim-numbers">
-      <label>Start (seconds)<input id="trimStartNumber" type="number" min="0" step="0.1" value="0"/></label>
-      <label>End (seconds)<input id="trimEndNumber" type="number" min="1" step="0.1" value="20"/></label>
-      <button id="playTrim" class="button subtle" type="button">▶ Preview selection</button>
-    </div>
-    <p class="trim-hint" id="trimHint">For longer recordings, only the selected part is analyzed. The complete uploaded source is retained separately for evidence integrity.</p>
-  </section>
-  <div class="trust"><span>✓ Original preserved</span><span>✓ SHA-256 hash</span><span>✓ Honest analysis</span></div>
-  <button id="upload" class="button primary full" disabled>Analyze recording <span>↗</span></button>
-  <div id="progress" class="progress" hidden><div id="progressBar"></div></div><p id="uploadStatus" class="small-center" role="status">Choose a video to begin.</p>
-</section>
-<section class="panel analysis">
-  <div class="panel-header"><div><span class="overline">02 / ANALYSIS STUDIO</span><h2>Grounded in the footage.</h2><p>Inspect processing results and original evidence.</p></div><div class="square-icon">✳</div></div>
-  <div class="frame" id="frame"><div class="empty-frame"><div class="rings"><span>◈</span></div><strong>Awaiting evidence</strong><small>Select an incident to inspect its analysis.</small></div></div>
-  <div id="stages" class="stages"><div><span>VEHICLE DETECTION</span><b>NO DATA</b></div><div><span>SPEECH TRANSCRIPTION</span><b>NO DATA</b></div><div><span>VIOLATION ASSESSMENT</span><b>NO DATA</b></div></div>
-  <div class="studio-bottom"><small id="selected">NO INCIDENT SELECTED</small><div><button id="play" class="link-button cyan" disabled>Play evidence ↗</button><button id="source" class="link-button cyan" disabled>Download original ↓</button><button id="recheck" class="link-button cyan" disabled>Re-run analysis ↻</button><button id="pdf" class="button mini" disabled>Export PDF ↓</button></div></div>
-</section>
 </div>
-<section id="incidents" class="incidents"><div class="section-bar"><div><span class="overline">03 / EVIDENCE LIBRARY</span><h2>Incident history <small id="count">0</small></h2></div><div class="filters"><input id="search" type="search" placeholder="Search recordings or IDs" aria-label="Search incidents"><select id="filter" aria-label="Filter statuses"><option value="all">All statuses</option><option value="ready">Ready</option><option value="processing">Processing</option><option value="queued">Queued</option><option value="failed">Failed</option></select></div></div>
-<div class="table-wrap"><table><thead><tr><th>RECORDING</th><th>UPLOADED</th><th>DURATION</th><th>STATUS</th><th>DETAILS</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="no-data">Connect to the API to see incidents.</td></tr></tbody></table></div>
-</section>
-<footer><span>TRAFFIC ENHANCER — BUILT ON EVIDENCE, NOT ASSUMPTIONS.</span><span>PRELIMINARY TECHNICAL MVP · NO OFFICIAL ENFORCEMENT</span></footer>
-</main></div></div>
-<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="loginHeading"><div class="login">
-  <div class="login-mark">TE <span>/ LAB</span></div><div class="login-rule"></div><span class="overline">OPERATOR ACCESS</span><h2 id="loginHeading">Safer roads start<br>with <em>better evidence.</em></h2>
-  <p>This development build uses a temporary operator key, not a consumer login. Do not expose it publicly until full user authentication is implemented.</p>
-  <form id="loginForm"><label for="key">API OPERATOR KEY</label><input id="key" type="password" autocomplete="off" placeholder="Enter TE_API_KEY" required><button class="button primary full">Enter workspace ↗</button></form>
-  <p id="loginError" class="error" role="alert"></p><small>Windows launcher: use the private key in <code>.traffic-local-key</code> (PowerShell: <code>Get-Content .\.traffic-local-key</code>). Codespaces: <code>cat .codespace-api-key</code>. Manual server: use your <code>TE_API_KEY</code>.</small>
-</div></div><div id="toast" class="toast" role="status" aria-live="polite"></div>
-</body></html>
+<div id="authScreen" class="auth-screen" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+  <div class="auth-panel">
+    <div class="auth-brand">TE <span>/ EVIDENCE WORKSPACE</span></div>
+    <div class="auth-rule"></div>
+    <div class="eyebrow">PRIVATE OPERATOR ACCESS</div>
+    <h2 id="authTitle">A clearer view of<br/><em>what happened.</em></h2>
+    <p>Enter your local development operator key to access recordings. This is not production user authentication.</p>
+    <form id="loginForm"><label class="field-label" for="key">OPERATOR KEY</label><input id="key" type="password" required autocomplete="off" placeholder="Enter your private API key"/><button class="primary-btn full" type="submit">Open workspace ↗</button></form>
+    <p id="loginError" class="login-error" role="alert"></p>
+    <small>Windows launcher: <code>Get-Content .\.traffic-local-key</code>. Codespaces: <code>cat .codespace-api-key</code>.</small>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
