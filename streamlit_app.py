@@ -7,7 +7,10 @@ resource-limited, non-persistent demo, not a public enforcement service.
 from __future__ import annotations
 
 import hashlib
-import hmac
+import secrets
+import re
+import threading
+import time
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +44,7 @@ for _name in _SECRET_NAMES:
             pass
 
 # Fail closed by default. This service may be visible on the open Internet.
+os.environ.setdefault("TE_API_KEY", secrets.token_urlsafe(32))
 os.environ["TE_ENV"] = "production"
 os.environ["TE_LOCAL_NO_AUTH"] = "0"
 os.environ.setdefault("TE_DATA_DIR", "/tmp/traffic-enhancer-streamlit")
@@ -78,36 +82,18 @@ div[data-testid="stMetric"] {border-top:1px solid #36505a;
 </style>""", unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="kicker">TE / LAB &nbsp; · &nbsp; PRIVATE EVIDENCE WORKSPACE</div>',
+    '<div class="kicker">TE / LAB &nbsp; · &nbsp; PUBLIC DEMO / SESSION-ONLY CASES</div>',
     unsafe_allow_html=True,
 )
 
-_SECRET = os.environ.get("TE_API_KEY", "").strip()
-if not _SECRET or len(_SECRET) < 16:
-    st.error("Cloud deployment is locked. Add a strong TE_API_KEY (at least 16 characters) in Streamlit app Settings → Secrets.")
-    st.caption("This app will not expose uploaded recordings without an operator secret.")
-    st.stop()
+# No visitor password. Never show other browser sessions' case IDs.
+if "te_case_ids" not in st.session_state:
+    st.session_state.te_case_ids = []
+if "te_upload_count" not in st.session_state:
+    st.session_state.te_upload_count = 0
 
-if "te_logged_in" not in st.session_state:
-    st.session_state.te_logged_in = False
-
-if not st.session_state.te_logged_in:
-    st.markdown(
-        '<div class="hero-title">Safer roads start<br>with <span>better evidence.</span></div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<p class="hero-subtitle">Enter your private operator password to access the video evidence workspace.</p>',
-                unsafe_allow_html=True)
-    with st.form("sign_in"):
-        supplied = st.text_input("Operator password", type="password")
-        submit = st.form_submit_button("Open workspace", type="primary", use_container_width=True)
-    if submit:
-        if hmac.compare_digest(supplied.encode(), _SECRET.encode()):
-            st.session_state.te_logged_in = True
-            st.rerun()
-        else:
-            st.error("Incorrect operator password.")
-    st.stop()
+st.caption("No password required · Session-only case history · "
+           "Use nonsensitive demo clips only; this is not a private evidence vault.")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from services.api import main as backend  # noqa: E402
@@ -127,7 +113,7 @@ def api_request(method: str, path: str, **kwargs):
     """Keep the backend operator key on the server, never send it to the browser."""
     response = local_api().request(
         method, "/api/v1" + path,
-        headers={"Authorization": "Bearer " + _SECRET},
+        headers={"Authorization": "Bearer " + backend.KEY},
         **kwargs,
     )
     if response.status_code >= 400:
@@ -138,8 +124,38 @@ def api_request(method: str, path: str, **kwargs):
         raise RuntimeError(f"{response.status_code}: {info}")
     return response
 
-def all_cases():
-    return api_request("GET", "/incidents").json().get("items", [])
+def session_cases():
+    """Show only random case IDs created in the current Streamlit session."""
+    records = []
+    for case_id in list(st.session_state.te_case_ids)[-20:]:
+        if not re.fullmatch(r"[0-9a-f]{32}", str(case_id)):
+            continue
+        try:
+            records.append(api_request("GET", f"/incidents/{case_id}").json())
+        except RuntimeError:
+            continue  # Ephemeral Cloud files can be reset at any time.
+    return list(reversed(records))
+
+
+@st.cache_resource
+def public_demo_quota():
+    return {"lock": threading.Lock(), "timestamps": []}
+
+
+def reserve_demo_analysis() -> bool:
+    """Small in-memory limits to reduce anonymous abuse and API spending."""
+    if st.session_state.te_upload_count >= 4:
+        return False
+    tracker = public_demo_quota()
+    with tracker["lock"]:
+        now = time.monotonic()
+        tracker["timestamps"][:] = [t for t in tracker["timestamps"]
+                                    if now - t < 86400]
+        if len(tracker["timestamps"]) >= 20:
+            return False
+        tracker["timestamps"].append(now)
+    st.session_state.te_upload_count += 1
+    return True
 
 def stage_status(panel, label: str, data):
     record = data if isinstance(data, dict) else {}
@@ -191,6 +207,11 @@ def pending_work():
     st.session_state.pending_work = None
     try:
         result = future.result()
+        if st.session_state.pop("pending_kind", "") == "upload":
+            incident_id = result.get("id") if isinstance(result, dict) else None
+            if incident_id and re.fullmatch(r"[0-9a-f]{32}", str(incident_id)):
+                if incident_id not in st.session_state.te_case_ids:
+                    st.session_state.te_case_ids.append(incident_id)
         st.session_state.last_result = ("success", result)
     except Exception as exc:
         st.session_state.last_result = ("error", str(exc)[:500])
@@ -205,10 +226,9 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
-    st.caption("Private demo · Uploaded files are not permanently stored or backed up on Community Cloud.")
-    if st.button("Sign out"):
-        st.session_state.te_logged_in = False
-        st.session_state.pop("pending_work", None)
+    st.caption("No sign-in required. Case lists are per browser session; files have no durable backup.")
+    if st.button("Forget this session's case links"):
+        st.session_state.te_case_ids = []
         st.rerun()
 
 pending_work()
@@ -220,7 +240,7 @@ if last_result:
         st.error("Analysis failed: " + str(last_result[1]))
 
 try:
-    incident_list = all_cases()
+    incident_list = session_cases()
 except Exception as exc:
     st.error("Cannot load evidence database: " + str(exc)[:300])
     st.stop()
@@ -314,9 +334,13 @@ elif area == "New analysis":
                         st.error("Choose a shorter interval or smaller source file for Cloud processing.")
                     else:
                         full=abs(start)<0.01 and end>=duration-0.11 and duration<=180
-                        st.session_state.pending_work=jobs().submit(
-                            upload_and_analyze,blob,incoming.name,start,end,full)
-                        st.rerun()
+                        if reserve_demo_analysis():
+                            st.session_state.pending_kind = "upload"
+                            st.session_state.pending_work=jobs().submit(
+                                upload_and_analyze,blob,incoming.name,start,end,full)
+                            st.rerun()
+                        else:
+                            st.warning("Public demo processing limit reached. Try later or use the local app.")
                 st.caption("Qwen and Whisper run only when you configure their secrets; GPU-based YOLO and Egyptian plate OCR are not enabled on free Community Cloud.")
 
 elif area in ("Evidence studio","Incident library"):
@@ -374,10 +398,14 @@ elif area in ("Evidence studio","Incident library"):
             stage_status(st,"Potential violation review",a.get("violation_assessment"))
             if selected["status"] in ("ready","failed"):
                 if st.button("Re-run AI analysis on this clip",use_container_width=True):
-                    st.session_state.pending_work=jobs().submit(
-                        lambda: api_request("POST",f"/incidents/{selected_id}/reanalyze",
-                                            timeout=360).json())
-                    st.rerun()
+                    if reserve_demo_analysis():
+                        st.session_state.pending_kind = "rerun"
+                        st.session_state.pending_work=jobs().submit(
+                            lambda: api_request("POST",f"/incidents/{selected_id}/reanalyze",
+                                                timeout=360).json())
+                        st.rerun()
+                    else:
+                        st.warning("Public demo processing limit reached.")
             if selected["status"]=="ready":
                 try:
                     pdf=api_request("GET",f"/incidents/{selected_id}/report.pdf").content
@@ -405,4 +433,7 @@ elif area=="System health":
             st.markdown(f"**{title}**")
             st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
     st.warning("A configured API does not guarantee requests will succeed. Free endpoints may be rate-limited, discontinued, or unable to analyze a specific incident.")
-    st.info("Community Cloud may put the app to sleep and its local database/videos can disappear across restarts. Use only authorized, non-sensitive recordings. No government verification or permanent evidence vault is included.")
+    st.info("This no-password demo shows only the current browser session's cases, but "
+            "files still live in temporary shared server storage. They are not encrypted "
+            "or permanently preserved. Anyone with the URL can consume the limited AI "
+            "quota. Upload nonsensitive videos only. No official enforcement.")
