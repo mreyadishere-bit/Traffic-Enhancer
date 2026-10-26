@@ -24,7 +24,7 @@
    | `TE_MAX_UPLOAD_MB` | `25` |
    | `TE_DATA_DIR` | `/app/data` |
 
-6. Restart the service after saving environment variables. Open the **real HTTPS URL shown by the dashboard** and enter your private `TE_API_KEY` in the login form. The app only has a shared operator key; restrict access to authorized testers and do not upload private road footage.
+6. Under **Advanced settings → Kept folders** (or later **Settings → Files**), ensure `/app/data` is kept. The Dockerfile declares `VOLUME ["/app/data"]`. On the free plan these files can survive routine container restarts but **are not automatically backed up**: export anything important yourself. Restart the service after saving environment variables. Open the **real HTTPS URL shown by the dashboard** and enter your private `TE_API_KEY` in the login form. The app only has a shared operator key; restrict access to authorized testers and do not upload private road footage.
 7. Once GitHub is connected, blitz.cloud builds new versions automatically on branch pushes. Free-plan builds may be delayed/throttled; see [the platform's published deploy cadence](https://blitz.cloud/docs/deploy-from-github/#when-your-code-changes).
 
 ## Realistic limitations
