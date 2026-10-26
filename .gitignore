@@ -8,3 +8,5 @@ __pycache__/
 
 .traffic-local-key
 .codespace-api-key
+
+.streamlit/secrets.toml
