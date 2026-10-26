@@ -1,17 +1,17 @@
 {
-  "name": "Traffic Enhancer · Web Development",
+  "name": "Traffic Enhancer — GitHub-only AI demo",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
   "forwardPorts": [
     8000
   ],
   "portsAttributes": {
     "8000": {
-      "label": "Traffic Enhancer — Private Web App",
+      "label": "Traffic Enhancer — Private AI demo",
       "onAutoForward": "openBrowser",
       "visibility": "private"
     }
   },
-  "postCreateCommand": "python -m pip install -r requirements.txt",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   "postStartCommand": "bash .devcontainer/start.sh",
   "customizations": {
     "vscode": {
