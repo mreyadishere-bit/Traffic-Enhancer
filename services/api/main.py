@@ -223,8 +223,12 @@ def capabilities():
                  "loaded_and_validated": False},
         "vehicle_tracking": {"configured": bool(os.getenv("TE_YOLO_MODEL", "").strip()),
                              "model_tested": False},
-        "speech": {"configured": bool(os.getenv("TE_ASR_MODEL", "").strip()),
-                   "model_tested": False},
+        "speech": {
+            "configured": bool(os.getenv("TE_ASR_MODEL", "").strip()) or
+                 (bool(os.getenv("TE_GROQ_ASR_MODEL", "").strip()) and
+                  bool(os.getenv("TE_GROQ_API_KEY", "").strip())),
+            "mode": "groq" if os.getenv("TE_GROQ_ASR_MODEL") else "local",
+            "model_tested": False},
         "plate_ocr": {"configured": bool(os.getenv("TE_PLATE_MODEL", "").strip()),
                       "model_tested": False},
         "traffic_violation_verification": {"available": False,
