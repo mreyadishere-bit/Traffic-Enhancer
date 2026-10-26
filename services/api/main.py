@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .analysis import inspect_video
 from .report import build_report
+from . import reviews
 
 BASE = Path(__file__).resolve().parents[2]
 DATA = Path(os.environ.get("TE_DATA_DIR", str(BASE / "data"))).resolve()
@@ -108,6 +109,7 @@ def initialize():
         columns = {row[1] for row in db.execute("PRAGMA table_info(incidents)").fetchall()}
         if "stage" not in columns:
             db.execute("ALTER TABLE incidents ADD COLUMN stage TEXT DEFAULT 'unknown'")
+        reviews.initialize(db)
 
 
 @asynccontextmanager
@@ -137,6 +139,8 @@ def evidence_path(row):
     safe_suffix = Path(row["filename"]).suffix.lower()
     if safe_suffix not in {".mp4", ".mov", ".mkv"}:
         safe_suffix = ".mp4"
+    if json.loads(row["video_json"]).get("selection", {}).get("was_trimmed"):
+        safe_suffix = ".mp4"
     new_path = EVIDENCE / (row["id"] + safe_suffix)
     if new_path.exists():
         return new_path
@@ -151,6 +155,11 @@ def read_incident(incident_id):
     return dict(row)
 
 
+def read_review_public(incident_id):
+    with connect() as db:
+        return reviews.read_review(db, incident_id)
+
+
 def public_incident(row):
     return {
         "id": row["id"], "filename": row["filename"],
@@ -159,6 +168,7 @@ def public_incident(row):
         "video": json.loads(row["video_json"]), "status": row["status"],
         "analysis": json.loads(row["analysis_json"]) if row["analysis_json"] else None,
         "error": row["error"], "stage": row.get("stage") or row["status"],
+        "review": read_review_public(row["id"]),
     }
 
 
@@ -199,9 +209,11 @@ def analyze_record(incident_id):
         def on_stage(stage):
             with connect() as db:
                 db.execute("UPDATE incidents SET stage=? WHERE id=?", (stage, incident_id))
+        review = read_review_public(incident_id)
         result = inspect_video(evidence_path(row),
                                DERIVED / (incident_id + ".jpg"),
-                               json.loads(row["video_json"]), on_stage=on_stage)
+                               json.loads(row["video_json"]), on_stage=on_stage,
+                               manual_description=review.get("manual_description") or None)
         with connect() as db:
             db.execute("UPDATE incidents SET status='ready', stage='complete', analysis_json=? WHERE id=?",
                        (json.dumps(result, ensure_ascii=False), incident_id))
@@ -243,6 +255,7 @@ async def upload_incident(
     background: BackgroundTasks, video: UploadFile = File(...),
     start_seconds: float | None = Form(default=None),
     end_seconds: float | None = Form(default=None),
+    driver_description: str = Form(default="", max_length=500),
 ):
     ensure_media_tools()
     filename = Path(video.filename or "recording.mp4").name[:160]
@@ -318,6 +331,11 @@ async def upload_incident(
         raise
     finally:
         await video.close()
+    if driver_description.strip():
+        with connect() as db:
+            reviews.write_review(db, incident_id,
+                reviews.ReviewUpdate(manual_description=driver_description.strip()),
+                metadata["duration_seconds"], {})
     background.add_task(analyze_record, incident_id)
     return {"id": incident_id, "status": "queued",
             "sha256": source_digest.hexdigest(),
@@ -336,11 +354,23 @@ def get_incident(incident_id: str):
     return public_incident(read_incident(incident_id))
 
 
+
+@app.put("/api/v1/incidents/{incident_id}/review", dependencies=[Depends(authorize)])
+def update_review(incident_id: str, changes: reviews.ReviewUpdate):
+    row = read_incident(incident_id)
+    if row["status"] in {"queued", "processing"}:
+        raise HTTPException(409, "Review is available after analysis finishes")
+    with connect() as db:
+        updated, rerun = reviews.write_review(
+            db, incident_id, changes, row["duration"], json.loads(row["analysis_json"] or "{}"))
+    return {"review": updated, "reanalyze_recommended": rerun}
+
+
 @app.get("/api/v1/incidents/{incident_id}/video", dependencies=[Depends(authorize)])
 def get_video(incident_id: str):
     row = read_incident(incident_id)
     media_type = {".mp4": "video/mp4", ".mov": "video/quicktime",
-                  ".mkv": "video/x-matroska"}.get(Path(row["filename"]).suffix.lower(), "application/octet-stream")
+                  ".mkv": "video/x-matroska"}.get(evidence_path(row).suffix.lower(), "application/octet-stream")
     return FileResponse(evidence_path(row), media_type=media_type,
                         filename=row["filename"])
 

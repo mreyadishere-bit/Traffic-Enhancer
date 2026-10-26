@@ -52,7 +52,8 @@ def transcribe_audio(original: Path, metadata: dict) -> dict:
                 "note": f"{type(exc).__name__}: {str(exc)[:250]}"}
 
 
-def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) -> dict:
+def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None,
+                  manual_description: str | None = None) -> dict:
     def progress(stage):
         if on_stage:
             on_stage(stage)
@@ -69,7 +70,10 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
     progress('transcribing_audio')
     speech = transcribe_audio(original, metadata)
     progress('interpreting_driver_claim')
-    claim = parse_driver_claim(speech.get("text"))
+    claim = parse_driver_claim(manual_description or speech.get("text"))
+    if manual_description:
+        claim["source"] = "user_supplied_description"
+        claim["note"] = "Operator-provided claim, not audio or verified video evidence."
     progress('tracking_vehicles')
     tracking = track_vehicles(original, metadata)
     progress('qwen_visual_reasoning')
