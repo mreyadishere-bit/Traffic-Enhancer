@@ -23,14 +23,63 @@ from .plate import scan_plates
 from .assessment import match_target, assess_potential_events
 
 
+
+def transcribe_via_groq(original: Path, model_name: str) -> dict:
+    """Opt-in HTTPS API transcription with actual clip audio, not a guessed statement."""
+    import httpx
+    api_key = os.getenv("TE_GROQ_API_KEY", "").strip()
+    if not api_key:
+        return {"status": "not_configured", "text": None,
+                "note": "Set TE_GROQ_API_KEY in the hosting provider's secrets."}
+    with tempfile.TemporaryDirectory() as temp:
+        flac = Path(temp) / "speech.flac"
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                        "-i", str(original), "-vn", "-map", "0:a:0",
+                        "-ac", "1", "-ar", "16000", "-c:a", "flac", str(flac)],
+                       capture_output=True, check=True, timeout=65)
+        if not flac.is_file() or flac.stat().st_size > 24 * 1024 * 1024:
+            raise ValueError("Audio exceeds Groq free-tier upload limit")
+        with flac.open("rb") as f:
+            response = httpx.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": "Bearer " + api_key},
+                files={"file": ("speech.flac", f, "audio/flac")},
+                data={"model": model_name, "response_format": "verbose_json",
+                      "temperature": "0"},
+                timeout=httpx.Timeout(100, connect=12))
+        response.raise_for_status()
+        result = response.json()
+        segments = []
+        for part in (result.get("segments") or [])[:100]:
+            if isinstance(part, dict):
+                segments.append({"start": round(float(part.get("start", 0)),2),
+                                 "end": round(float(part.get("end", 0)),2),
+                                 "text": str(part.get("text", "")).strip()})
+        return {"status": "completed", "text": str(result.get("text","")).strip(),
+                "segments": segments, "language": result.get("language"),
+                "model": model_name, "provider": "groq_operator_opt_in",
+                "note": "Audio sent to Groq under the configured API agreement; "
+                        "transcription is unverified."}
+
+
 def transcribe_audio(original: Path, metadata: dict) -> dict:
     if not metadata.get("has_audio"):
         return {"status": "unavailable", "text": None,
                 "note": "The uploaded video has no audio track."}
+    remote_model = os.getenv("TE_GROQ_ASR_MODEL", "").strip()
+    if remote_model:
+        try:
+            return transcribe_via_groq(original, remote_model)
+        except Exception as exc:
+            # Do not leak API token in diagnostic messages.
+            message = str(exc).replace(os.getenv("TE_GROQ_API_KEY", ""), "[secret]") if os.getenv("TE_GROQ_API_KEY") else str(exc)
+            return {"status": "failed", "text": None, "model": remote_model,
+                    "provider": "groq_operator_opt_in",
+                    "note": f"{type(exc).__name__}: {message[:220]}"}
     model_name = os.getenv("TE_ASR_MODEL", "").strip()
     if not model_name:
         return {"status": "not_configured", "text": None,
-                "note": "Install faster-whisper and set TE_ASR_MODEL."}
+                "note": "Set TE_ASR_MODEL for local Whisper or TE_GROQ_ASR_MODEL and TE_GROQ_API_KEY for remote speech."}
     try:
         with tempfile.TemporaryDirectory() as temp:
             wav = Path(temp) / "speech.wav"

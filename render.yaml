@@ -28,3 +28,6 @@ services:
         value: qwen/qwen-2.5-vl-7b-instruct:free
       - key: TE_QWEN_API_KEY
         sync: false
+      # Optional Groq Speech-to-Text (configure key in Render Environment).
+      - key: TE_GROQ_ASR_MODEL
+        value: whisper-large-v3-turbo
