@@ -162,7 +162,10 @@ importPreview.onloadedmetadata=()=>{
   sourceDuration=importPreview.duration;
   if(!Number.isFinite(sourceDuration)||sourceDuration<1){sourceDuration=null;return}
   $("startSec").value=0;
-  $("endSec").value=String(Math.min(20,sourceDuration));
+  // MP4 browsers can report a rounded timeline slightly longer than FFprobe.
+  // Leave a small safety margin; server will still verify the actual source.
+  const last=Math.min(20,Math.max(1,Math.floor((sourceDuration-.35)*10)/10));
+  $("endSec").value=String(last);
   $("trimSeek").max=String(sourceDuration);
   $("trimHelp").textContent="Source: "+timecode(sourceDuration)+
     ". Select up to three minutes for analysis. The full original is retained.";
