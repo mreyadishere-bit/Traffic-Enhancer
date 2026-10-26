@@ -2,6 +2,9 @@ name: Evidence studio end-to-end browser tests
 on:
   pull_request:
   workflow_dispatch:
+concurrency:
+  group: browser-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -18,13 +21,12 @@ jobs:
           node-version: '22'
       - name: Install FFmpeg and runtime
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
           python -m pip install -r requirements-dev.txt
       - name: Install test browser
         run: |
           npm install --no-save playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
       - name: Create non-incident sample video
         run: |
           ffmpeg -hide_banner -loglevel error -y -f lavfi -i color=c=blue:s=320x180:r=5 -t 3 -c:v libx264 -pix_fmt yuv420p tests/e2e-demo.mp4
