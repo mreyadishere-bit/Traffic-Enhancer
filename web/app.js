@@ -1,260 +1,494 @@
 "use strict";
-// Operator key lives in memory only. This is a single-operator dev MVP.
-const el=id=>document.getElementById(id);
-let key="",items=[],selected=null,mediaUrl=null,currentFile=null,poll=null,toastTimer=null;
-let previewObjectUrl=null,trimDuration=null,trimStart=0,trimEnd=0,trimReady=false;
-const trimFormat=s=>{const seconds=Math.floor(Number(s)||0);return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")};
-const MAX_SEGMENT=180;
-const date=s=>s?new Date(s).toLocaleString():"—";
-const mb=n=>(Number(n)/1024/1024).toFixed(1)+" MB";
-el("today").textContent=new Date().toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric"}).toUpperCase();
-function toast(message){el("toast").textContent=message;el("toast").classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>el("toast").classList.remove("show"),5000)}
-async function api(path,opts={}){
- const res=await fetch("/api/v1"+path,{...opts,headers:{Authorization:"Bearer "+key,...(opts.headers||{})}});
- if(!res.ok){let msg="Request failed ("+res.status+")";try{let x=await res.json();if(typeof x.detail==="string")msg=x.detail}catch{}throw Error(msg)}
- return res;
+/* Traffic Enhancer evidence studio — real API data, no simulated cases. */
+const $ = id => document.getElementById(id);
+let operatorKey = "", cases = [], selected = null, activeTrackId = null;
+let mediaUrl = null, importUrl = null, chosen = null, sourceDuration = null, manualBounds = false;
+let refreshTimer = null, toastTimer = null, activePreviewId = null, connecting = false;
+const video = $("caseVideo"), canvas = $("trackCanvas");
+const clamp = (x,min,max) => Math.min(max,Math.max(min,x));
+const statusText = x => (x || "unavailable").replaceAll("_"," ");
+const timecode = x => {
+  const s = Math.max(0,Math.floor(Number(x)||0));
+  return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+};
+const fmtDate = x => x ? new Date(x).toLocaleString() : "—";
+const idShort = x => x ? x.slice(0,12).toUpperCase() : "—";
+const make = (tag,cls,text) => {
+  const item=document.createElement(tag);
+  if(cls)item.className=cls;
+  if(text!==undefined)item.textContent=String(text);
+  return item;
+};
+$("today").textContent=new Date().toLocaleDateString("en-US",{day:"numeric",month:"short",year:"numeric"});
+function notice(message) {
+  const toast=$("toast");
+  toast.textContent=message;toast.classList.add("active");
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove("active"),6500);
 }
-el("loginForm").addEventListener("submit",async e=>{
- e.preventDefault();key=el("key").value;el("loginError").textContent="";
- try{const r=await api("/incidents");items=(await r.json()).items;el("overlay").classList.add("hidden");el("key").value="";render();refreshLoop();const caps=(await(await api("/capabilities")).json());if(!caps.qwen.configured)toast("Qwen2.5-VL is not configured on this backend. See docs/AI_RUNTIME.md.");}catch(error){key="";el("loginError").textContent=error.message==="Invalid operator key"?"Invalid key for this running server. Use the key shown in your Windows launcher or .traffic-local-key, or the key configured as TE_API_KEY.":error.message}
+async function request(path, options={}) {
+  const response=await fetch("/api/v1"+path,{
+    ...options,headers:{Authorization:"Bearer "+operatorKey,...(options.headers||{})}
+  });
+  if(!response.ok) {
+    let message="Request failed ("+response.status+")";
+    try{const value=await response.json();if(typeof value.detail==="string")message=value.detail}catch{}
+    throw new Error(message);
+  }
+  return response;
+}
+$("loginForm").addEventListener("submit",async event=>{
+  event.preventDefault();
+  if(connecting)return;
+  connecting=true;
+  $("loginError").textContent="";
+  operatorKey=$("key").value;
+  try{
+    cases=(await(await request("/incidents")).json()).items;
+    $("key").value="";
+    $("authScreen").hidden=true;
+    renderLibrary();renderCounts();await loadCapabilities();
+    refreshLoop();
+    if(cases.length)await openCase(cases[0],false);
+  }catch(error){
+    operatorKey="";
+    $("loginError").textContent=error.message;
+  }finally{connecting=false}
 });
-el("disconnect").addEventListener("click",()=>{key="";items=[];selected=null;if(poll)clearInterval(poll);clearMedia();render();el("overlay").classList.remove("hidden")});
-function refreshLoop(){if(poll)clearInterval(poll);poll=setInterval(()=>{if(items.some(x=>["queued","processing"].includes(x.status)))refresh()},3000)}
-async function refresh(){
- if(!key)return;
- try{
-   const previousStatus=selected?.status;
-   items=(await(await api("/incidents")).json()).items;
-   if(selected){selected=items.find(x=>x.id===selected.id)||selected;}
-   render();
-   if(selected){
-     showAnalysis(selected);
-     // The upload selected this job before it finished. Populate the actual
-     // evidence preview when processing transitions from queued to ready.
-     if(previousStatus!=="ready"&&selected.status==="ready")await selectIncident(selected,false);
-   }
- }catch(e){toast("Refresh failed: "+e.message)}
-}
-el("refresh").addEventListener("click",refresh);
-el("newIncident").addEventListener("click",()=>{el("studio").scrollIntoView({behavior:"smooth"});el("video").click()});
-const drop=el("drop"),upload=el("video");
-drop.addEventListener("click",()=>upload.click());
-drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();upload.click()}});
-["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over")}));
-["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over")}));
-drop.addEventListener("drop",e=>{if(e.dataTransfer.files[0])choose(e.dataTransfer.files[0])});
-upload.addEventListener("change",()=>{if(upload.files[0])choose(upload.files[0])});
-function removeTrimPreview(){
- if(previewObjectUrl){URL.revokeObjectURL(previewObjectUrl);previewObjectUrl=null}
- el("trimPreview").pause();el("trimPreview").removeAttribute("src");el("trimPreview").load();
- el("trimPanel").hidden=true;trimDuration=null;trimReady=false;
-}
-function renderTrim(){
- const known=Number.isFinite(trimDuration)&&trimDuration>0;
- if(known){
-   el("trimStart").disabled=false;el("trimEnd").disabled=false;
-   el("trimStart").max=String(trimDuration);
-   el("trimEnd").max=String(trimDuration);
-   el("trimStart").value=String(trimStart);el("trimEnd").value=String(trimEnd);
-   el("sourceLength").textContent="Source length: "+trimFormat(trimDuration);
- }else{
-   el("trimStart").disabled=true;el("trimEnd").disabled=true;
-   el("sourceLength").textContent="Duration not readable in browser — use second inputs";
- }
- el("startLabel").textContent=trimFormat(trimStart);
- el("endLabel").textContent=trimFormat(trimEnd);
- el("trimStartNumber").value=String(Math.round(trimStart*10)/10);
- el("trimEndNumber").value=String(Math.round(trimEnd*10)/10);
- const length=trimEnd-trimStart;
- const valid=Number.isFinite(length)&&length>=1&&length<=MAX_SEGMENT&&trimStart>=0
-     &&(!known||trimEnd<=trimDuration+0.01);
- el("trimLength").textContent=valid?"Selected: "+trimFormat(length)+" ("+length.toFixed(1)+"s)":"Select 1–180 seconds";
- el("upload").disabled=!currentFile||!valid||!trimReady;
- el("playTrim").disabled=!known||!valid;
- el("trimHint").textContent=valid?
-   (known&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11
-    ? "Whole video selected; original will be analyzed as-is."
-    : "The server will re-encode this segment accurately; it keeps the original file and hashes both copies.")
-   : "Choose a clip of at least 1 second and at most 180 seconds.";
-}
-function setTrimBounds(which,raw){
- let value=Number(raw);
- if(!Number.isFinite(value))value=which==="start"?trimStart:trimEnd;
- const maximum=trimDuration??7200;
- if(which==="start"){
-   trimStart=Math.max(0,Math.min(value,maximum-1));
-   if(trimEnd<=trimStart+1)trimEnd=Math.min(maximum,trimStart+20);
-   if(trimEnd-trimStart>MAX_SEGMENT)trimEnd=Math.min(maximum,trimStart+MAX_SEGMENT);
- }else{
-   trimEnd=Math.max(1,Math.min(value,maximum));
-   if(trimStart>=trimEnd-1)trimStart=Math.max(0,trimEnd-20);
-   if(trimEnd-trimStart>MAX_SEGMENT)trimStart=Math.max(0,trimEnd-MAX_SEGMENT);
- }
- const player=el("trimPreview");
- if(trimDuration!==null&&player.readyState>=1){try{player.currentTime=trimStart}catch{}}
- renderTrim();
-}
-function choose(file){
- const ext=file.name.split(".").pop().toLowerCase();
- if(!["mp4","mov","mkv"].includes(ext)){toast("Supported formats: MP4, MOV, MKV");return}
- if(file.size>512*1024*1024){toast("Source exceeds 512 MB. Please reduce file size.");return}
- removeTrimPreview();
- currentFile=file;trimStart=0;trimEnd=20;
- el("filename").textContent=file.name;
- el("trimPanel").hidden=false;
- el("uploadStatus").textContent=mb(file.size)+" · Loading video preview…";
- trimReady=false;
- previewObjectUrl=URL.createObjectURL(file);
- el("trimPreview").src=previewObjectUrl;
- el("trimFallback").hidden=true;
- renderTrim();
-}
-el("trimPreview").addEventListener("loadedmetadata",()=>{
- const duration=el("trimPreview").duration;
- if(!Number.isFinite(duration)||duration<1){el("trimFallback").hidden=false;return}
- trimDuration=duration;trimReady=true;trimStart=0;trimEnd=duration<=MAX_SEGMENT?duration:Math.min(20,duration);
- el("uploadStatus").textContent=duration>MAX_SEGMENT?
-   "Long video detected: select your 1–180 second segment below.":
-   "Video ready. You can trim it before analysis.";
- renderTrim();
+$("disconnect").addEventListener("click",()=>{
+  operatorKey="";cases=[];selected=null;activeTrackId=null;activePreviewId=null;
+  if(refreshTimer)clearInterval(refreshTimer);
+  releaseVideo();renderCounts();renderLibrary();
+  $("authScreen").hidden=false;$("key").focus();
 });
-el("trimPreview").addEventListener("error",()=>{
- if(!currentFile)return;
- trimReady=true;
- el("trimFallback").hidden=false;
- el("uploadStatus").textContent="Cannot preview the codec in your browser. Enter segment seconds to trim.";
- renderTrim();
-});
-el("trimPreview").addEventListener("timeupdate",()=>{
- if(el("trimPreview").currentTime>trimEnd+0.08&&trimEnd>trimStart){
-   el("trimPreview").pause();
-   el("trimPreview").currentTime=trimStart;
- }
-});
-el("playTrim").addEventListener("click",()=>{
- const player=el("trimPreview");
- if(!Number.isFinite(trimDuration))return;
- player.currentTime=trimStart;player.play().catch(()=>toast("Preview not supported; server can still trim."));
-});
-el("trimStart").addEventListener("input",e=>setTrimBounds("start",e.target.value));
-el("trimEnd").addEventListener("input",e=>setTrimBounds("end",e.target.value));
-el("trimStartNumber").addEventListener("change",e=>setTrimBounds("start",e.target.value));
-el("trimEndNumber").addEventListener("change",e=>setTrimBounds("end",e.target.value));
-el("upload").addEventListener("click",()=>{
- if(!currentFile||!key)return;
- const xhr=new XMLHttpRequest();xhr.open("POST","/api/v1/incidents");xhr.setRequestHeader("Authorization","Bearer "+key);
- const data=new FormData();data.append("video",currentFile,currentFile.name);
- const full=Number.isFinite(trimDuration)&&Math.abs(trimStart)<0.01&&Math.abs(trimEnd-trimDuration)<0.11;
- if(!full){data.append("start_seconds",String(trimStart));data.append("end_seconds",String(trimEnd))}
- el("upload").disabled=true;el("progress").hidden=false;el("progressBar").style.width="0%";el("uploadStatus").textContent="Uploading original footage…";
- xhr.upload.onprogress=e=>{if(e.lengthComputable)el("progressBar").style.width=Math.round(100*e.loaded/e.total)+"%"};
- xhr.onload=async()=>{
-  let body={};try{body=JSON.parse(xhr.responseText)}catch{}
-  if(xhr.status===202){
-   toast("Original evidence accepted and hashed.");
-   currentFile=null;upload.value="";el("filename").textContent="Drop dashcam footage here";removeTrimPreview();
-   el("uploadStatus").textContent="Analyzing actual footage. Status will update…";
-   await refresh();const match=items.find(x=>x.id===body.id);if(match)selectIncident(match);
-   let tries=0;const track=setInterval(async()=>{tries++;await refresh();let x=items.find(i=>i.id===body.id);if((x&&!["queued","processing"].includes(x.status))||tries>40){clearInterval(track);el("progress").hidden=true;el("uploadStatus").textContent=x?.status==="ready"?"Preliminary report ready.":"View the incident library for job status."}},2000);
-  }else{el("progress").hidden=true;el("uploadStatus").textContent=body.detail||"Upload failed.";toast("Upload rejected: "+(body.detail||xhr.status))}
-  el("upload").disabled=!currentFile;
- };
- xhr.onerror=()=>{el("upload").disabled=false;el("progress").hidden=true;el("uploadStatus").textContent="Network interrupted. Check library before retrying."};
- xhr.send(data);
-});
-el("search").addEventListener("input",render);el("filter").addEventListener("change",render);
-function td(text,cls=""){const c=document.createElement("td");if(cls)c.className=cls;c.textContent=text;return c}
-function render(){
- el("nTotal").textContent=items.length;
- el("nReady").textContent=items.filter(x=>x.status==="ready").length;
- el("nPending").textContent=items.filter(x=>["queued","processing"].includes(x.status)).length;
- el("nFailed").textContent=items.filter(x=>x.status==="failed").length;
- el("count").textContent=items.length;
- const q=el("search").value.toLowerCase(),filter=el("filter").value;
- const rows=items.filter(x=>(filter==="all"||x.status===filter)&&(x.filename.toLowerCase().includes(q)||x.id.includes(q)));
- const tbody=el("rows");tbody.replaceChildren();
- if(!rows.length){const tr=document.createElement("tr");const cell=td("No incidents match these filters. Upload real dashcam footage to begin.","no-data");cell.colSpan=5;tr.append(cell);tbody.append(tr);return}
- rows.forEach(x=>{
-  const tr=document.createElement("tr");const filename=td("");const strong=document.createElement("span");strong.className="name";strong.textContent=x.filename;const minor=document.createElement("span");minor.className="file-id";minor.textContent=x.id.slice(0,14)+"… · "+mb(x.bytes);filename.append(strong,minor);
-  const status=td("");const tag=document.createElement("span");tag.className="tag "+x.status;tag.textContent=x.status;status.append(tag);
-  const action=td("");const btn=document.createElement("button");btn.className="inspect";btn.textContent="Inspect ↗";btn.addEventListener("click",()=>selectIncident(x));action.append(btn);
-  tr.append(filename,td(date(x.created_at)),td(Number(x.duration).toFixed(1)+" sec"),status,action);tbody.append(tr);
- });
+function refreshLoop(){
+  if(refreshTimer)clearInterval(refreshTimer);
+  refreshTimer=setInterval(()=>{
+    if(operatorKey)refresh(false);
+  },4000);
 }
-function clearMedia(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null}const root=el("frame");root.replaceChildren();const empty=document.createElement("div");empty.className="empty-frame";empty.textContent="Select a ready incident to inspect original evidence.";root.append(empty)}
-function stateRow(label,value){const wrap=document.createElement("div"),a=document.createElement("span"),b=document.createElement("b");a.textContent=label;b.textContent=(value||"no data").replaceAll("_"," ").toUpperCase();if(["not_configured","failed"].includes(value))b.className="warn";else if(value!=="completed")b.className="muted";wrap.append(a,b);return wrap}
-function showAnalysis(x){
- el("selected").textContent=x.id.slice(0,12).toUpperCase()+" / "+x.status.toUpperCase()+" / "+(x.stage||"").replaceAll("_"," ").toUpperCase();
- el("play").disabled=x.status!=="ready";el("pdf").disabled=x.status!=="ready";el("source").disabled=x.status!=="ready";el("recheck").disabled=!["ready","failed"].includes(x.status);
- const a=x.analysis||{}, stages=el("stages");stages.replaceChildren(
-   stateRow("VEHICLE DETECTION",a.vehicle_detection?.status||x.status),
-   stateRow("SPEECH TRANSCRIPTION",a.transcription?.status||x.status),
-   stateRow("VIOLATION ASSESSMENT",a.violation_assessment?.status||"not_implemented")
- );
- if(a.vehicle_detection?.detections?.length){
-   stages.append(stateRow("SAMPLED-FRAME DETECTIONS (CAPPED AT 250)",
-     String(a.vehicle_detection.detections.length)
-     +(a.vehicle_detection.detections.length>=250?" + (limit)":"")));
- }
- if(a.object_tracking?.sampled_frames){
-   stages.append(stateRow("VIDEO FRAMES SAMPLED",String(a.object_tracking.sampled_frames)));
- }
- const extras = [
-  ["QWEN2.5-VL VIDEO ANALYSIS",a.visual_reasoning?.status||"not_configured"],
-  ["VEHICLE TRACKING",a.object_tracking?.status||"not_configured"],
-  ["EGYPTIAN PLATE OCR",a.plate_recognition?.status||"not_configured"],
-  ["DRIVER VOICE DESCRIPTION",a.driver_claim?.status||"unavailable"],
-  ["TARGET VEHICLE MATCH",a.target_matching?.status||"unavailable"]
- ];
- extras.forEach(pair=>stages.append(stateRow(pair[0],pair[1])));
- // A completed incident can still contain individually failed AI stages.
- // Surface the stored error instead of implying every model succeeded.
- for(const [label,part] of [
-   ["Speech transcription",a.transcription],
-   ["YOLO/BoT-SORT",a.object_tracking],
-   ["Qwen2.5-VL",a.visual_reasoning],
-   ["Egyptian plate OCR",a.plate_recognition]
- ]){
-   if(part?.status==="failed" || part?.status==="unparseable"){
-     const error=document.createElement("p");
-     error.className="small-center";
-     error.style.textAlign="left";
-     error.style.color="#f6bc96";
-     error.textContent=label+" error: "+(part.note||"Inspect the model runtime logs.");
-     stages.append(error);
-   }
- }
-
- const summary=a.visual_reasoning?.observations?.scene_summary;
- if(summary){const p=document.createElement("p");p.className="small-center";p.textContent="Qwen visual assessment (UNVERIFIED): "+summary;stages.append(p)}
- if(a.driver_claim?.verbatim){const p=document.createElement("p");p.className="small-center";p.textContent="Driver's claim: "+a.driver_claim.verbatim;stages.append(p)}
- const candidates=a.violation_assessment?.candidates||[];
- for(const candidate of candidates.slice(0,6)){const p=document.createElement("p");p.className="small-center";p.textContent="Review candidate: "+candidate.category.replaceAll("_"," ")+" — "+candidate.visual_evidence+" at "+(candidate.time_seconds??"?")+"s";stages.append(p)}
- if(a.object_tracking?.tracks?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.object_tracking.tracks.length+" provisional tracking IDs across sampled frames. These are NOT necessarily distinct vehicles; IDs can change.";stages.append(p)}
- if(a.plate_recognition?.candidates?.length){const p=document.createElement("p");p.className="small-center";p.textContent=a.plate_recognition.candidates.length+" plate OCR candidate readings; none verified.";stages.append(p)}
- if(x.status==="failed"){const note=document.createElement("p");note.className="small-center";note.textContent=x.error||"Processing failed";const retry=document.createElement("button");retry.className="button mini";retry.textContent="Retry analysis ↻";retry.onclick=async()=>{try{await api("/incidents/"+x.id+"/reanalyze",{method:"POST"});toast("Reanalysis queued");await refresh()}catch(e){toast(e.message)}};stages.append(note,retry)}
+async function refresh(showToast=false){
+  if(!operatorKey)return;
+  try {
+    const prev=selected;
+    cases=(await(await request("/incidents")).json()).items;
+    renderCounts();renderLibrary();
+    if(prev){
+      const latest=cases.find(x=>x.id===prev.id);
+      if(latest){
+        selected=latest;
+        renderSelected(false);
+        if(prev.status!=="ready"&&latest.status==="ready")await preparePlayer(latest);
+      }
+    }
+    if(showToast)notice("Case library is up to date.");
+  }catch(error){notice("Unable to refresh: "+error.message)}
 }
-async function selectIncident(x,scroll=true){
- if(!x)return;selected=x;showAnalysis(x);clearMedia();if(scroll)el("studio").scrollIntoView({behavior:"smooth"});
- if(x.status!=="ready")return;
- try{const res=await api("/incidents/"+x.id+"/thumbnail");if(selected.id!==x.id)return;mediaUrl=URL.createObjectURL(await res.blob());const img=document.createElement("img");img.src=mediaUrl;img.alt="Actual frame extracted from uploaded footage";const chip=document.createElement("div");chip.className="image-chip";chip.textContent="SOURCE FRAME AT "+(Number(x.video?.selection?.start_seconds||0)+Number(x.analysis?.evidence?.keyframe_second||0)).toFixed(1)+"s";el("frame").replaceChildren(img,chip)}catch(e){el("frame").textContent="Preview unavailable: "+e.message}
+$("refresh").addEventListener("click",()=>refresh(true));
+function renderCounts(){
+  $("nCases").textContent=cases.length;
+  $("nReady").textContent=cases.filter(x=>x.status==="ready").length;
+  $("nPending").textContent=cases.filter(x=>["queued","processing"].includes(x.status)).length;
+  $("nFailed").textContent=cases.filter(x=>x.status==="failed").length;
 }
-async function asset(path,name,videoMode=false){
- if(!selected)return;
- try{const response=await api(path);const blob=await response.blob();if(videoMode){clearMedia();mediaUrl=URL.createObjectURL(blob);const player=document.createElement("video");player.controls=true;player.playsInline=true;player.src=mediaUrl;el("frame").replaceChildren(player);player.play().catch(()=>{})}
- else{const url=URL.createObjectURL(blob);const anchor=document.createElement("a");anchor.href=url;anchor.download=name;document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}}catch(e){toast(e.message)}
+function renderLibrary(){
+  const q=$("search").value.trim().toLowerCase(),f=$("statusFilter").value;
+  const visible=cases.filter(x=>(f==="all"||x.status===f)
+    &&(x.filename.toLowerCase().includes(q)||x.id.toLowerCase().includes(q)));
+  const container=$("caseList");container.replaceChildren();
+  if(!visible.length){
+    container.append(make("p","placeholder",
+      cases.length?"No recordings match the current filters.":"No recordings yet. Import a video to begin."));
+    return;
+  }
+  visible.forEach(item=>{
+    const row=make("div","case-row");
+    const name=make("div");
+    name.append(make("strong","case-name",item.filename),
+      make("small","",idShort(item.id)+" · "+Number(item.duration).toFixed(1)+"s clip"));
+    const when=make("div","case-meta",fmtDate(item.created_at));
+    const tag=make("span","case-label "+item.status,item.status);
+    const button=make("button","inspect-btn","Inspect ↗");
+    button.addEventListener("click",()=>openCase(item));
+    row.append(name,when,tag,button);container.append(row);
+  });
 }
-el("play").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/video",null,true)};
-el("pdf").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/report.pdf","traffic-report-"+selected.id+".pdf")};
-el("source").onclick=()=>{if(selected)asset("/incidents/"+selected.id+"/source",selected.filename)};
-
-el("recheck").onclick=async()=>{
- if(!selected || !["ready","failed"].includes(selected.status))return;
- const id=selected.id;
- el("recheck").disabled=true;
- try{
-   await api("/incidents/"+id+"/reanalyze",{method:"POST"});
-   toast("Analysis requested using current configured models.");
-   await refresh();
- }catch(error){toast("Could not restart analysis: "+error.message);el("recheck").disabled=false}
+$("search").addEventListener("input",renderLibrary);
+$("statusFilter").addEventListener("change",renderLibrary);
+async function loadCapabilities(){
+  try{
+    const caps=(await(await request("/capabilities")).json());
+    const summary=[
+      ["Qwen2.5-VL",caps.qwen?.configured,"Multimodal reasoning",caps.qwen?.model],
+      ["Vehicle tracking",caps.vehicle_tracking?.configured,"YOLO + tracker",""],
+      ["Speech transcription",caps.speech?.configured,"Faster-Whisper",""],
+      ["Egyptian plate OCR",caps.plate_ocr?.configured,"Specialized detector required",""],
+      ["Traffic-offense verification",false,"Human review required",""],
+      ["Direct dashcam transfer",false,"Physical device validation needed",""]
+    ];
+    const parent=$("capabilities");parent.replaceChildren();
+    summary.forEach(([name,on,desc,model])=>{
+      const card=make("article","capability");
+      card.append(make("strong","",name),make("span","",on?"CONFIGURED · NOT VALIDATED":"NOT AVAILABLE / CONFIGURED"),
+          make("p","",desc+(model?" · "+model:"")));
+      parent.append(card);
+    });
+  }catch(e){$("capabilities").textContent="Capabilities unavailable: "+e.message}
+}
+const importSection=$("intake"), importPreview=$("trimVideo");
+function showIntake(show=true){
+  importSection.hidden=!show;
+  if(show)importSection.scrollIntoView({behavior:"smooth",block:"start"});
+}
+$("newCase").onclick=()=>showIntake(true);
+$("closeIntake").onclick=()=>showIntake(false);
+const drop=$("drop"),file=$("file");
+drop.onclick=()=>file.click();
+drop.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();file.click()}};
+drop.ondragover=e=>{e.preventDefault();drop.classList.add("over")};
+drop.ondragleave=e=>{e.preventDefault();drop.classList.remove("over")};
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove("over");if(e.dataTransfer.files[0])chooseFile(e.dataTransfer.files[0])};
+file.onchange=()=>{if(file.files[0])chooseFile(file.files[0])};
+function chooseFile(picked){
+  if(!/\.(mp4|mov|mkv)$/i.test(picked.name)){notice("Choose an MP4, MOV or MKV file.");return}
+  if(picked.size>512*1024*1024){notice("Source video exceeds 512 MB.");return}
+  chosen=picked;sourceDuration=null;manualBounds=false;
+  if(importUrl)URL.revokeObjectURL(importUrl);
+  importUrl=URL.createObjectURL(picked);importPreview.src=importUrl;
+  $("filename").textContent=picked.name;
+  $("trimHelp").textContent="Reading video metadata…";
+  $("upload").disabled=true;
+}
+importPreview.onloadedmetadata=()=>{
+  sourceDuration=importPreview.duration;
+  if(!Number.isFinite(sourceDuration)||sourceDuration<1){sourceDuration=null;return}
+  $("startSec").value=0;
+  manualBounds=false;
+  // MP4 browsers can report a rounded timeline slightly longer than FFprobe.
+  // Leave a small safety margin; server will still verify the actual source.
+  const last=Math.min(20,Math.max(1,Math.floor((sourceDuration-.35)*10)/10));
+  $("endSec").value=String(last);
+  $("trimSeek").max=String(sourceDuration);
+  $("trimHelp").textContent="Source: "+timecode(sourceDuration)+
+    ". Select up to three minutes for analysis. The full original is retained.";
+  validateTrim();
+};
+importPreview.onerror=()=>{
+  if(chosen){$("trimHelp").textContent="This codec cannot be previewed in the browser. You may still enter segment times.";validateTrim()}
+};
+importPreview.ontimeupdate=()=>{$("trimSeek").value=String(importPreview.currentTime)};
+$("trimSeek").oninput=e=>{try{importPreview.currentTime=Number(e.target.value)}catch{}};
+$("startSec").oninput=()=>{manualBounds=true;validateTrim()};
+$("endSec").oninput=()=>{manualBounds=true;validateTrim()};
+function validateTrim(){
+  if(!chosen){$("upload").disabled=true;return false}
+  const start=Number($("startSec").value),end=Number($("endSec").value);
+  const valid=Number.isFinite(start)&&Number.isFinite(end)&&start>=0&&end-start>=1
+    &&end-start<=180&&end<=7200&&(sourceDuration===null||end<=sourceDuration+.1)
+    &&(sourceDuration!==null||manualBounds);
+  $("upload").disabled=!valid;
+  if(!valid)$("uploadStatus").textContent=sourceDuration===null&&!manualBounds?
+    "Preview unavailable: enter start and end seconds manually before uploading.":
+    "Select a valid 1–180 second segment.";
+  else $("uploadStatus").textContent="Selected "+(end-start).toFixed(1)+"s · Original recording preserved.";
+  return valid;
+}
+$("upload").onclick=()=>{
+  if(!operatorKey||!validateTrim())return;
+  const form=new FormData();form.append("video",chosen,chosen.name);
+  const s=Number($("startSec").value),e=Number($("endSec").value);
+  const full=sourceDuration!==null&&s===0&&Math.abs(e-sourceDuration)<.1;
+  if(!full){form.append("start_seconds",String(s));form.append("end_seconds",String(e))}
+  const description=$("uploadClaim").value.trim();
+  if(description)form.append("driver_description",description);
+  const xhr=new XMLHttpRequest();
+  xhr.open("POST","/api/v1/incidents");
+  xhr.setRequestHeader("Authorization","Bearer "+operatorKey);
+  $("upload").disabled=true;$("progress").hidden=false;
+  $("uploadStatus").textContent="Uploading original evidence…";
+  xhr.upload.onprogress=ev=>{
+    if(ev.lengthComputable)$("progressBar").style.width=(100*ev.loaded/ev.total).toFixed(0)+"%";
+  };
+  xhr.onload=async()=>{
+    let data={};try{data=JSON.parse(xhr.responseText)}catch{}
+    $("progress").hidden=true;
+    if(xhr.status===202){
+      chosen=null;file.value="";$("filename").textContent="Choose a recording";
+      if(importUrl){URL.revokeObjectURL(importUrl);importUrl=null}
+      importPreview.removeAttribute("src");importPreview.load();
+      $("uploadStatus").textContent="Recording accepted. Watch its real processing stages below.";
+      await refresh();
+      const job=cases.find(x=>x.id===data.id);
+      if(job)await openCase(job);
+    }else{
+      $("upload").disabled=false;
+      $("uploadStatus").textContent=typeof data.detail==="string"?data.detail:"Upload failed.";
+      notice("Upload rejected: "+$("uploadStatus").textContent);
+    }
+  };
+  xhr.onerror=()=>{
+    $("upload").disabled=false;$("progress").hidden=true;
+    notice("Network interruption. Check the library before re-uploading.");
+  };
+  xhr.send(form);
+};
+function releaseVideo(){
+  video.pause();
+  video.removeAttribute("src");video.load();
+  if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null}
+  activePreviewId=null;
+  video.hidden=true;
+  $("playerEmpty").hidden=false;$("videoPill").hidden=true;
+  $("play").disabled=$("back").disabled=$("forward").disabled=true;
+  $("seek").disabled=true;drawOverlay();
+}
+async function openCase(item,scroll=true){
+  if(!item)return;
+  const changed=selected?.id!==item.id;
+  selected=item;
+  activeTrackId=item.review?.selected_track_id??null;
+  renderSelected(changed);
+  if(changed||activePreviewId!==item.id)await preparePlayer(item);
+  if(scroll)$("studio").scrollIntoView({behavior:"smooth",block:"start"});
+}
+function renderSelected(replaceForm){
+  const x=selected;if(!x)return;
+  const a=x.analysis||{}, review=x.review||{};
+  $("selectedId").textContent=idShort(x.id)+" · "+statusText(x.stage||x.status).toUpperCase();
+  $("currentCaseTitle").textContent=x.filename;
+  $("caseState").textContent=x.status==="ready"?"REVIEW AVAILABLE":statusText(x.status).toUpperCase();
+  $("caseHeading").textContent=x.status==="ready"?"What does the evidence show?":"Analysis "+statusText(x.status);
+  $("caseIntro").textContent=x.status==="ready"?
+    "Only verified observations from your uploaded footage belong in the report. AI suggestions remain preliminary.":
+    (x.error||"The recording is being processed. The model stages will appear when available.");
+  $("report").disabled=x.status!=="ready";
+  $("reanalyze").disabled=!["ready","failed"].includes(x.status);
+  $("saveReview").disabled=!["ready","failed"].includes(x.status);
+  $("evidenceSource").disabled=!["ready","failed"].includes(x.status);
+  if(replaceForm){
+    $("reviewClaim").value=review.manual_description || a.driver_claim?.verbatim || "";
+    $("reviewNote").value=review.review_note || "";
+    $("reviewEventSecond").value=review.reviewed_event_second??"";
+    $("reviewStatus").value=review.status || "unreviewed";
+  }
+  showStages(x);renderTracks(x);renderEvents(x);renderMarkers(x);
+  drawOverlay();
+}
+function showStages(x){
+  const a=x.analysis||{};
+  const stages=[
+    ["Speech",a.transcription],
+    ["Driver description",a.driver_claim],
+    ["Vehicle tracking",a.object_tracking],
+    ["Qwen2.5-VL",a.visual_reasoning],
+    ["Egyptian plate OCR",a.plate_recognition],
+    ["Event assessment",a.violation_assessment],
+    ["Vehicle association",a.target_matching]
+  ];
+  const parent=$("stageList");parent.replaceChildren();
+  if(x.status==="processing"||x.status==="queued"){
+    parent.append(make("p","placeholder","Currently: "+statusText(x.stage||x.status)));
+  }
+  stages.forEach(([name,stage])=>{
+    const status=stage?.status||"unavailable";
+    const row=make("div","stage-item");
+    const label=make("span","",name);
+    const b=make("b",["failed","unparseable"].includes(status)?"fail":
+      ["not_configured","requires_review","candidate_for_review"].includes(status)?"warn":"",statusText(status));
+    row.append(label,b);
+    if(stage?.status==="failed"||stage?.status==="not_configured"||stage?.status==="unparseable"){
+      row.append(make("small","",stage.note||"This model is not available."));
+    }
+    parent.append(row);
+  });
+}
+function renderTracks(x){
+  const items=x.analysis?.object_tracking?.tracks||[];
+  const parent=$("trackList");parent.replaceChildren();
+  if(!items.length){
+    parent.append(make("p","placeholder","No tracked vehicles available. Enable and test your vehicle detector."));
+    return;
+  }
+  items.forEach(track=>{
+    if(track.track_id===undefined||track.track_id===null)return;
+    const b=make("button","track-chip"+(activeTrackId===track.track_id?" selected":""));
+    b.append(make("span","",track.label+" · #"+track.track_id),
+      make("small","",(track.observations?.length||0)+" sampled observations"));
+    b.onclick=()=>{
+      activeTrackId=track.track_id;
+      renderTracks(x);drawOverlay();
+      const first=track.observations?.find(o=>Number.isFinite(o.second));
+      if(first && !video.hidden)video.currentTime=first.second;
+      notice("Track #"+track.track_id+" selected for review. Save to retain the selection.");
+    };
+    parent.append(b);
+  });
+}
+function renderEvents(x){
+  const a=x.analysis||{};
+  const parent=$("eventList");parent.replaceChildren();
+  const observations=a.visual_reasoning?.observations||{};
+  if(observations.scene_summary){
+    const scene=make("article","event-card");
+    scene.append(make("div","event-head","Visual scene summary · unverified"),
+      make("p","",observations.scene_summary));
+    parent.append(scene);
+  }
+  const events=a.violation_assessment?.candidates||[];
+  if(!events.length){
+    const note=a.visual_reasoning?.status==="completed"?
+      "No supported potential event was produced. This does not prove that no incident occurred.":
+      "No visual event assessment is available. Qwen requires an operational model and appropriate footage.";
+    parent.append(make("p","placeholder",note));
+    return;
+  }
+  events.forEach(event=>{
+    const card=make("article","event-card"), head=make("div","event-head");
+    head.append(make("strong","",statusText(event.category)));
+    if(Number.isFinite(event.time_seconds)){
+      const jump=make("button","","Go to "+timecode(event.time_seconds)+" ↗");
+      jump.onclick=()=>{if(!video.hidden)video.currentTime=event.time_seconds};
+      head.append(jump);
+    }
+    card.append(head,make("p","",event.visual_evidence||"Visual model did not provide supporting details."),
+      make("small","","MODEL SUGGESTION · "+(event.uncertainty||"unverified")+" · HUMAN REVIEW REQUIRED"));
+    parent.append(card);
+  });
+}
+function renderMarkers(x){
+  const parent=$("markers");parent.replaceChildren();
+  const duration=Number(x.duration)||0;
+  if(!duration)return;
+  const times=[
+    ...(x.analysis?.violation_assessment?.candidates||[]).map(item=>item.time_seconds),
+    x.review?.reviewed_event_second,
+    ...(x.analysis?.transcription?.segments||[]).map(s=>s.start)
+  ];
+  times.filter(t=>typeof t==="number"&&t>=0&&t<=duration).slice(0,70).forEach(t=>{
+    const mark=make("i");mark.style.left=(t/duration*100)+"%";parent.append(mark);
+  });
+}
+function drawOverlay(){
+  const parent=$("playerContainer");
+  const width=parent.clientWidth,height=parent.clientHeight;
+  if(width<=0||height<=0)return;
+  const density=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.round(width*density);canvas.height=Math.round(height*density);
+  const ctx=canvas.getContext("2d");ctx.scale(density,density);ctx.clearRect(0,0,width,height);
+  if(!selected||video.hidden||video.readyState===0||!$("overlayToggle").checked)return;
+  const w=video.videoWidth||selected.video?.width,h=video.videoHeight||selected.video?.height;
+  if(!w||!h)return;
+  const scale=Math.min(width/w,height/h),imageW=w*scale,imageH=h*scale;
+  const offsetX=(width-imageW)/2,offsetY=(height-imageH)/2;
+  const tracks=selected.analysis?.object_tracking?.tracks||[];
+  const debug=$("debugToggle").checked;
+  const visible=debug?tracks:tracks.filter(t=>t.track_id===activeTrackId);
+  const fps=Number(selected.video?.frame_rate)||30;
+  const stride=Number(selected.analysis?.object_tracking?.stride)||5;
+  const windowSeconds=Math.min(.7,Math.max(.23,1.4*stride/fps));
+  for(const track of visible){
+    const observations=(track.observations||[]).filter(o=>Number.isFinite(o.second)&&Array.isArray(o.box_xyxy));
+    if(!observations.length)continue;
+    let match=null,dt=Infinity;
+    for(const o of observations){
+      const diff=Math.abs(o.second-video.currentTime);
+      if(diff<dt){match=o;dt=diff}
+    }
+    if(!match||dt>windowSeconds)continue;
+    const [left,top,right,bottom]=match.box_xyxy;
+    const x=offsetX+left*scale,y=offsetY+top*scale;
+    const boxW=(right-left)*scale,boxH=(bottom-top)*scale;
+    if(boxW<=1||boxH<=1)continue;
+    ctx.strokeStyle=debug&&track.track_id!==activeTrackId?"rgba(210,230,228,.60)":"#bceee2";
+    ctx.lineWidth=debug?1.4:2.5;
+    ctx.strokeRect(x,y,boxW,boxH);
+    const label="TRACK "+track.track_id+" · "+track.label;
+    ctx.font="700 11px DM Sans, sans-serif";
+    const labelW=ctx.measureText(label).width+16;
+    ctx.fillStyle="#162d32e8";ctx.fillRect(x,Math.max(0,y-24),labelW,22);
+    ctx.fillStyle="#e5faf4";ctx.fillText(label,x+8,Math.max(14,y-9));
+  }
+}
+window.addEventListener("resize",drawOverlay);
+$("overlayToggle").onchange=drawOverlay;
+$("debugToggle").onchange=()=>{if($("debugToggle").checked)$("overlayToggle").checked=true;drawOverlay()};
+async function preparePlayer(x){
+  releaseVideo();
+  if(x.status!=="ready")return;
+  try{
+    const response=await request("/incidents/"+x.id+"/video");
+    const blob=await response.blob();
+    if(selected?.id!==x.id)return;
+    mediaUrl=URL.createObjectURL(blob);
+    video.src=mediaUrl;video.hidden=false;
+    $("playerEmpty").hidden=true;$("videoPill").hidden=false;
+    activePreviewId=x.id;
+    $("play").disabled=$("back").disabled=$("forward").disabled=false;
+    $("seek").disabled=false;
+    video.load();
+  }catch(e){$("playerEmpty").textContent="Cannot load source video: "+e.message}
+}
+video.onloadedmetadata=()=>{syncTime();drawOverlay()};
+video.ontimeupdate=()=>{syncTime();drawOverlay()};
+video.onseeked=drawOverlay;
+video.onplay=()=>{$("play").textContent="Ⅱ"};
+video.onpause=()=>{$("play").textContent="▶"};
+function syncTime(){
+  const d=video.duration||selected?.duration||0;
+  $("timecode").textContent=timecode(video.currentTime)+" / "+timecode(d);
+  if(d>0)$("seek").value=String(Math.floor(video.currentTime/d*1000));
+  const origin=Number(selected?.video?.selection?.start_seconds||0);
+  $("sourceTime").textContent="Source T+"+timecode(origin+video.currentTime)+" · Clip T+"+timecode(video.currentTime);
+}
+$("seek").oninput=e=>{if(Number.isFinite(video.duration)&&video.duration>0)video.currentTime=Number(e.target.value)/1000*video.duration};
+$("play").onclick=()=>{if(video.paused)video.play().catch(e=>notice(e.message));else video.pause()};
+$("back").onclick=()=>{video.currentTime=Math.max(0,video.currentTime-1/(selected?.video?.frame_rate||30))};
+$("forward").onclick=()=>{video.currentTime=Math.min(video.duration||1,video.currentTime+1/(selected?.video?.frame_rate||30))};
+async function download(path,name){
+  if(!selected)return;
+  try{
+    const blob=await(await request(path)).blob(), url=URL.createObjectURL(blob);
+    const a=make("a");a.href=url;a.download=name;
+    document.body.append(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  }catch(e){notice("Download failed: "+e.message)}
+}
+$("evidenceSource").onclick=()=>{if(selected)download("/incidents/"+selected.id+"/source",selected.filename)};
+$("report").onclick=()=>{if(selected)download("/incidents/"+selected.id+"/report.pdf","traffic-report-"+selected.id+".pdf")};
+$("saveReview").onclick=async()=>{
+  if(!selected)return;
+  const eventRaw=$("reviewEventSecond").value.trim();
+  const eventSecond=eventRaw?Number(eventRaw):null;
+  if(eventSecond!==null&&(!Number.isFinite(eventSecond)||eventSecond<0||eventSecond>selected.duration)){
+    notice("Event time must be inside the selected clip.");return;
+  }
+  const payload={
+    status:$("reviewStatus").value,
+    manual_description:$("reviewClaim").value.trim(),
+    selected_track_id:activeTrackId,
+    reviewed_event_second:eventSecond,
+    review_note:$("reviewNote").value.trim()
+  };
+  $("saveReview").disabled=true;
+  try{
+    const r=(await(await request("/incidents/"+selected.id+"/review",{
+      method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)
+    })).json());
+    selected.review=r.review;
+    cases=cases.map(x=>x.id===selected.id?selected:x);
+    renderEvents(selected);renderMarkers(selected);
+    notice(r.reanalyze_recommended?
+      "Review saved. Re-analyze to use the updated description in the AI pipeline.":
+      "Reviewer notes saved. No official violation has been declared.");
+  }catch(e){notice("Cannot save review: "+e.message)}
+  finally{$("saveReview").disabled=false}
+};
+$("reanalyze").onclick=async()=>{
+  if(!selected)return;
+  const id=selected.id;
+  $("reanalyze").disabled=true;
+  try{
+    await request("/incidents/"+id+"/reanalyze",{method:"POST"});
+    notice("Re-analysis started. It will use the current model configuration and saved driver description.");
+    await refresh();
+  }catch(e){notice("Re-analysis error: "+e.message);$("reanalyze").disabled=false}
 };

@@ -1,182 +1,205 @@
-"""Honest preliminary evidence PDF for operator inspection.
-
-PDF pages state model statuses and hypothetical observations, not legal guilt.
-The source SHA-256 always refers to the uploaded original video bytes.
-"""
+"""Human-review evidence report; renders only data obtained from the actual case."""
 from io import BytesIO
+import os
+import re
 import textwrap
+from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 
+W,H=A4
+DARK=colors.HexColor("#172832")
+MUTED=colors.HexColor("#607783")
+ACCENT=colors.HexColor("#227B75")
+LINE=colors.HexColor("#DFE7E7")
+WARM=colors.HexColor("#A06438")
 
-def build_report(incident, preview_path=None):
-    output = BytesIO()
-    c = canvas.Canvas(output, pagesize=A4)
-    width, height = A4
-    dark = colors.HexColor("#111F2D")
-    muted = colors.HexColor("#526779")
-    cyan = colors.HexColor("#13A8BB")
-    y = height - 145
+def _font():
+    if "TEUnicode" in pdfmetrics.getRegisteredFontNames():
+        return "TEUnicode"
+    for path in [os.getenv("TE_REPORT_FONT_PATH", ""),
+                 "C:/Windows/Fonts/tahoma.ttf",
+                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]:
+        if path and Path(path).is_file():
+            try:
+                pdfmetrics.registerFont(TTFont("TEUnicode",path))
+                return "TEUnicode"
+            except Exception:
+                continue
+    return "Helvetica"
 
-    def page_header():
-        c.setFillColor(dark)
-        c.rect(0, height - 112, width, 112, stroke=0, fill=1)
-        c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 23)
-        c.drawString(42, height - 60, "TRAFFIC ENHANCER")
-        c.setFont("Helvetica", 10)
-        c.drawString(44, height - 81, "PRELIMINARY EVIDENCE INTELLIGENCE")
-        c.setFillColor(colors.HexColor("#B91C1C"))
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(42, height - 129, "NOT VERIFIED  |  NO OFFICIAL TRAFFIC CITATION")
+def _text(value,font):
+    value=str(value if value is not None else "Unavailable")
+    if re.search(r"[\u0600-\u06ff]",value):
+        try:
+            import arabic_reshaper
+            from bidi.algorithm import get_display
+            value=get_display(arabic_reshaper.reshape(value))
+        except ImportError:
+            pass
+    if font=="Helvetica":
+        return value.encode("latin-1","replace").decode("latin-1")
+    return value
 
-    def ensure(space=36):
-        nonlocal y
-        if y < 65 + space:
+def build_report(incident,preview_path=None):
+    out=BytesIO()
+    c=canvas.Canvas(out,pagesize=A4)
+    c.setTitle("Traffic Enhancer — Preliminary evidence")
+    font=_font()
+    y=H-52
+    page=0
+    a=incident.get("analysis") or {}
+    review=incident.get("review") or {}
+    selection=(incident.get("video") or {}).get("selection") or {}
+    vision=a.get("visual_reasoning") or {}
+    tracks=a.get("object_tracking") or {}
+    speech=a.get("transcription") or {}
+    plate=a.get("plate_recognition") or {}
+    assessment=a.get("violation_assessment") or {}
+
+    def header_footer():
+        c.setStrokeColor(LINE);c.line(39,49,W-39,49)
+        c.setFont(font,8);c.setFillColor(MUTED)
+        c.drawString(40,35,"TRAFFIC ENHANCER / PRELIMINARY REVIEW ONLY")
+        c.drawRightString(W-40,35,str(page))
+
+    def new_page():
+        nonlocal y,page
+        if page:
+            header_footer()
             c.showPage()
-            page_header()
-            y = height - 153
+        page+=1
+        y=H-59
+        c.setFillColor(ACCENT);c.rect(40,H-40,31,3,stroke=0,fill=1)
 
-    def section(title):
+    def ensure(space=25):
+        if y<65+space:new_page()
+
+    def heading(label):
         nonlocal y
-        ensure(48)
-        y -= 12
-        c.setFillColor(cyan)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(42, y, title.upper())
-        y -= 23
+        ensure(42);y-=17
+        c.setFillColor(ACCENT);c.setFont(font,10)
+        c.drawString(40,y,_text(label.upper(),font))
+        y-=22
 
-    def row(label, value):
+    def write(value,small=False):
         nonlocal y
-        ensure(22)
-        c.setFillColor(muted)
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(42, y, label.upper()[:25])
-        c.setFillColor(dark)
-        c.setFont("Helvetica", 9)
-        safe = str(value if value is not None else "Unavailable").encode("ascii", "replace").decode("ascii")
-        c.drawString(185, y, safe[:83])
-        y -= 20
+        source=str(value if value is not None else "Not available")
+        for paragraph in source.splitlines() or [""]:
+            lines=textwrap.wrap(paragraph, width=84,
+                                break_long_words=True) or [""]
+            for line in lines:
+                ensure(16)
+                c.setFont(font,8.7 if small else 9.5)
+                c.setFillColor(DARK)
+                s=_text(line,font)
+                if re.search(r"[\u0600-\u06ff]",line):
+                    c.drawRightString(W-40,y,s)
+                else:
+                    c.drawString(40,y,s)
+                y-=16
+        y-=6
 
-    def paragraph(value):
+    def field(label,value):
         nonlocal y
-        safe = str(value or "Not available").encode("ascii", "replace").decode("ascii")
-        for line in textwrap.wrap(safe, width=95, break_long_words=True) or ["Not available"]:
-            ensure(16)
-            c.setFillColor(dark)
-            c.setFont("Helvetica", 9)
-            c.drawString(42, y, line)
-            y -= 15
-        y -= 7
+        ensure(28)
+        c.setFont(font,8);c.setFillColor(MUTED)
+        c.drawString(40,y,label.upper())
+        v=str(value if value is not None else "Unavailable")
+        chunks=textwrap.wrap(v,59,break_long_words=True) or [""]
+        for ix,txt in enumerate(chunks[:4]):
+            if ix:y-=15;ensure(16)
+            c.setFont(font,9);c.setFillColor(DARK)
+            display=_text(txt,font)
+            if re.search(r"[\u0600-\u06ff]",txt):
+                c.drawRightString(W-40,y,display)
+            else:
+                c.drawString(202,y,display)
+        y-=23
 
-    page_header()
-    info = incident.get("analysis") or {}
-    track = info.get("object_tracking") or {}
-    ocr = info.get("plate_recognition") or {}
-    speech = info.get("transcription") or {}
-    claim = info.get("driver_claim") or {}
-    qwen = info.get("visual_reasoning") or {}
-    assessment = info.get("violation_assessment") or {}
+    new_page()
+    c.setFillColor(DARK);c.setFont(font,24)
+    c.drawString(40,y,"TRAFFIC ENHANCER");y-=23
+    c.setFont(font,10);c.setFillColor(MUTED)
+    c.drawString(40,y,"PRELIMINARY EVIDENCE INTELLIGENCE");y-=34
+    c.setFillColor(colors.HexColor("#EDF4F3"))
+    c.roundRect(40,y-43,W-80,54,7,stroke=0,fill=1)
+    c.setFillColor(WARM);c.setFont(font,10)
+    c.drawString(52,y-14,"NOT VERIFIED / NOT AN OFFICIAL TRAFFIC CITATION")
+    c.setFillColor(MUTED);c.setFont(font,8)
+    c.drawString(52,y-31,"Visual observations and reviewer notes are distinct from proven offenses.")
+    y-=76
 
-    section("Executive assessment / incomplete until human review")
-    row("Review state", info.get("review_status", "unreviewed"))
-    row("Vision reasoning", qwen.get("status", "not_configured"))
-    row("Potential event count", len(assessment.get("candidates") or []))
-    row("Tracking IDs", len(track.get("tracks") or []))
-    row("Stored detections", len((info.get("vehicle_detection") or {}).get("detections") or []))
-    paragraph("Frame detections count boxes across multiple sampled frames (capped at 250 in stored output); "
-              "tracking IDs can change and do not prove a unique number of vehicles. "
-              "No official violation is established.")
+    heading("Case at a glance")
+    field("Reference",incident.get("id"))
+    field("Original recording",incident.get("filename"))
+    field("Uploaded (UTC)",incident.get("created_at"))
+    field("Selected source",str(selection.get("start_seconds",0))+" - "+
+          str(selection.get("end_seconds",incident.get("duration")))+" seconds")
+    field("Review status",review.get("status","unreviewed").replace("_"," "))
+    field("Proposed events",str(len(assessment.get("candidates") or []))+" (unverified)")
+    if preview_path and Path(preview_path).is_file():
+        heading("Source evidence frame / unannotated")
+        reader=ImageReader(str(preview_path))
+        nw,nh=reader.getSize();factor=min((W-80)/max(1,nw),218/max(1,nh))
+        fw,fh=nw*factor,nh*factor
+        ensure(fh+40)
+        c.drawImage(reader,40,y-fh,width=fw,height=fh,mask="auto")
+        y-=fh+14
+        write("Actual decoded video frame, not a visual proof of a traffic offense.",True)
 
-    section("Evidence integrity")
-    for label, value in (
-        ("Incident ID", incident["id"]),
-        ("Uploaded at (UTC)", incident["created_at"]),
-        ("Source filename", incident["filename"]),
-        ("SHA-256", incident["sha256"]),
-        ("Selected source range", (
-            f"{incident['video'].get('selection', {}).get('start_seconds', 0)} - "
-            f"{incident['video'].get('selection', {}).get('end_seconds', incident['duration'])} sec"
-        )),
-        ("Source duration", incident["video"].get("selection", {}).get("source_duration_seconds", incident["duration"])),
-        ("Clip SHA-256", incident["video"].get("selection", {}).get("clip_sha256", incident["sha256"])),
-        ("Duration", str(incident["duration"]) + " seconds"),
-        ("Frames", str(incident["video"].get("width")) + " x " + str(incident["video"].get("height"))),
-    ):
-        row(label, value)
-
-
-    # Embed an ACTUAL decoded frame from the submitted recording. Never invent
-    # plate close-ups or labels. The rest of the original footage remains linked
-    # by its immutable source SHA-256 in the report.
-    if preview_path is not None and preview_path.is_file():
-        ensure(240)
-        section("Source recording - actual unannotated frame")
-        reader = ImageReader(str(preview_path))
-        natural_w, natural_h = reader.getSize()
-        scale = min(505 / natural_w, 210 / natural_h)
-        display_w, display_h = natural_w * scale, natural_h * scale
-        c.drawImage(reader, 42, y - display_h, width=display_w, height=display_h,
-                    mask="auto")
-        y -= display_h + 10
-        paragraph("Image is taken directly from the uploaded video. This single frame does not prove a traffic offense.")
-
-    section("AI execution state")
-    for label, value in (
-        ("Speech", speech.get("status")),
-        ("Video tracker", track.get("status")),
-        ("Qwen2.5-VL", qwen.get("status")),
-        ("Egyptian plate OCR", ocr.get("status")),
-        ("Incident assessment", assessment.get("status")),
-        ("Human review", info.get("review_status")),
-    ):
-        row(label, value)
-
-    section("Processing errors / unmet prerequisites")
-    errors = 0
-    for name, stage in (
-        ("Speech", speech), ("Tracking", track),
-        ("Qwen2.5-VL", qwen), ("Plate OCR", ocr)
-    ):
-        status = stage.get("status", "unavailable")
-        if status in ("failed", "unparseable", "not_configured"):
-            errors += 1
-            paragraph(name + " (" + status + "): " +
-                      str(stage.get("note") or "Model was not configured or completed."))
-    if not errors:
-        paragraph("No reported model execution failures. Accuracy remains unverified.")
-
-    section("Driver-stated description - unverified")
-    paragraph(claim.get("verbatim") or "No usable audio description was available.")
-    section("Machine visual interpretation - unverified")
-    observations = qwen.get("observations") or {}
-    paragraph(observations.get("scene_summary") or qwen.get("note") or "Vision model did not run.")
-    section("Potential events requiring human review")
-    candidates = assessment.get("candidates") or []
-    if not candidates:
-        paragraph("No visually grounded potential events were reported. This is not a declaration that the driving was lawful.")
+    heading("What the driver reported")
+    if review.get("manual_description"):
+        write("USER-SUPPLIED CLAIM (not verified by video):",True)
+        write(review["manual_description"])
+    elif (a.get("driver_claim") or {}).get("verbatim"):
+        write("AUTOMATED SPEECH TRANSCRIPT (unverified):",True)
+        write(a["driver_claim"]["verbatim"])
     else:
-        for item in candidates[:8]:
-            paragraph(f"{item['category']} at {item.get('time_seconds')}s. "
-                      f"AI observation: {item.get('visual_evidence')}. "
-                      f"Uncertainty: {item.get('uncertainty')}. Human review required.")
-    section("License plate / vehicle information")
-    paragraph(f"Plate OCR candidates: {len(ocr.get('candidates', []))}. "
-              "No plate string is verified. No vehicle owner or official registry was queried.")
-    section("Evidence-handling limitations")
-    paragraph("AI may be mistaken about traffic signals, road boundaries, vehicle identity, and object motion. "
-              "Video frames may be sampled, so crucial transitions could be absent.")
-    paragraph("Original uploaded file must be reviewed for any real-world decision. "
-              "Recording time and GPS are not inferred from upload metadata. "
-              "A SHA-256 hash verifies only the stored uploaded bytes, not camera provenance.")
-    c.setStrokeColor(colors.HexColor("#CBD5E1"))
-    ensure(32)
-    c.line(42, 51, width - 42, 51)
-    c.setFont("Helvetica", 8)
-    c.setFillColor(muted)
-    c.drawString(42, 37, "Traffic Enhancer / AI-assisted preliminary evidence / Not for automated enforcement")
+        write("No usable driver description available.")
+    if speech.get("status")=="failed":
+        write("Speech processing problem: "+str(speech.get("note") or "unknown"),True)
+
+    heading("Visual reasoning")
+    details=vision.get("observations") or {}
+    write(details.get("scene_summary") or
+          "Qwen2.5-VL status: "+str(vision.get("status","not configured")))
+    events=assessment.get("candidates") or []
+    if not events:
+        write("No visually supported event was returned. This does not prove that no offense occurred.",True)
+    for i,event in enumerate(events[:8],1):
+        write(str(i)+". "+str(event.get("category","unknown")).replace("_"," ")+
+              " / clip T+"+str(event.get("time_seconds"))+"s")
+        write(str(event.get("visual_evidence",""))+" | Uncertainty: "+
+              str(event.get("uncertainty","unverified")),True)
+
+    heading("Reviewer findings")
+    field("Selected track",review.get("selected_track_id"))
+    field("Event time in clip",review.get("reviewed_event_second"))
+    field("Provisional tracks",len(tracks.get("tracks") or []))
+    write(review.get("review_note") or "No human reviewer note was saved.")
+    write("Tracking IDs may change; selected tracks do not confirm a driver's or vehicle owner's identity.",True)
+
+    heading("AI stage availability")
+    for name,stage in [("Speech",speech),("Vehicle tracking",tracks),
+                       ("Qwen2.5-VL",vision),("Plate OCR",plate),
+                       ("Event assessment",assessment)]:
+        field(name,stage.get("status","unavailable"))
+    field("OCR candidates",len(plate.get("candidates") or []))
+    write("OCR readings, when present, are unverified. No official vehicle registry was accessed.",True)
+
+    heading("Evidence provenance")
+    field("Source SHA-256",incident.get("sha256"))
+    field("Clip SHA-256",selection.get("clip_sha256",incident.get("sha256")))
+    field("Source duration",selection.get("source_duration_seconds",incident.get("duration")))
+    write("SHA-256 confirms the stored uploaded bytes against this digest, not the event origin. "
+          "Upload timestamp is not proven recording time. "
+          "No automated finding here creates any official legal liability.",True)
+    header_footer()
     c.save()
-    return output.getvalue()
+    return out.getvalue()
