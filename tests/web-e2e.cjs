@@ -15,15 +15,15 @@ const assert = require("node:assert/strict");
     await page.locator("#nCases").waitFor();
     assert.equal(await page.locator("#nCases").textContent(),"0");
     await page.locator("#file").setInputFiles("tests/e2e-demo.mp4");
-    await page.waitForFunction(()=>!document.querySelector("#upload").disabled,{timeout:12000});
+    await page.waitForFunction(()=>!document.querySelector("#upload").disabled,null,{timeout:12000});
     await page.locator("#uploadClaim").fill("Take photo, blue Kia on the left shoulder");
     await page.locator("#upload").click();
     await page.waitForFunction(()=>document.querySelector("#nCases").textContent==="1",
-      {timeout:20000});
+      null,{timeout:20000});
     await page.waitForFunction(()=>document.querySelector("#caseState").textContent.includes("REVIEW AVAILABLE"),
-      {timeout:70000});
+      null,{timeout:70000});
     await page.waitForFunction(()=>document.querySelector("#caseVideo").readyState>=1,
-      {timeout:30000});
+      null,{timeout:30000});
     assert.equal(await page.locator("#caseVideo").isVisible(),true);
     assert.equal(await page.locator("#reviewClaim").inputValue(),
       "Take photo, blue Kia on the left shoulder");
@@ -31,7 +31,7 @@ const assert = require("node:assert/strict");
     await page.locator("#reviewNote").fill("Fixture is an empty generated road-colored frame; no real incident.");
     await page.locator("#reviewStatus").selectOption("reviewed_no_conclusion");
     await page.locator("#saveReview").click();
-    await page.waitForFunction(()=>document.querySelector("#toast").textContent.includes("saved"),{timeout:12000});
+    await page.waitForFunction(()=>document.querySelector("#toast").textContent.includes("saved"),null,{timeout:12000});
     fs.mkdirSync("artifacts/ui",{recursive:true});
     await page.locator("#studio").scrollIntoViewIfNeeded();
     await page.screenshot({path:"artifacts/ui/evidence-studio-desktop.png",fullPage:true});
