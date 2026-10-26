@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .provider_status import provider_failure
+
 
 MODEL_DEFAULT = "Qwen/Qwen2.5-VL-3B-Instruct"
 ALLOWED = {"shoulder_driving", "red_light", "littering", "missing_plate"}
@@ -79,7 +81,7 @@ def describe_video(original: Path, duration: float, claim: dict) -> dict:
             return _describe_via_remote(original, duration, claim, model_id, remote_base)
         except Exception as exc:
             return {"status": "failed", "model": model_id, "backend": "operator_configured_remote",
-                    "observations": None, "note": f"{type(exc).__name__}: {str(exc)[:250]}"}
+                    "observations": None, "note": provider_failure("OpenRouter", exc)}
     try:
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration

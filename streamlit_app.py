@@ -164,7 +164,12 @@ def stage_status(panel, label: str, data):
     if status in ("failed", "unparseable"):
         panel.error(f"{label}: {status}")
         if message:
-            panel.caption(message[:280])
+            panel.caption(message[:450])
+        if "401" in message and ("Groq" in message or "OpenRouter" in message or
+                                  "Unauthorized" in message):
+            panel.info("Update the corresponding API key in Streamlit App Settings → "
+                       "Secrets, then reboot and re-run this clip. "
+                       "See System health for a key-only diagnostic.")
     elif status in ("not_configured", "unavailable", "requires_review"):
         panel.warning(f"{label}: {status.replace('_', ' ')}")
         if message:
@@ -522,7 +527,34 @@ elif area=="System health":
         with st.container(border=True):
             st.markdown(f"**{title}**")
             st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
-    st.warning("A configured API does not guarantee requests will succeed. Free endpoints may be rate-limited, discontinued, or unable to analyze a specific incident.")
+    st.warning("A configured API key is not necessarily valid. HTTP 401 means the service "
+               "rejected authentication, not that the road video failed.")
+    with st.expander("Fix 401 Unauthorized — OpenRouter & Groq", expanded=True):
+        st.markdown(
+            "1. Create **new** API keys at [OpenRouter](https://openrouter.ai/settings/keys) "
+            "and [Groq](https://console.groq.com/keys). Revoke any keys shown in screenshots.\n"
+            "2. Open your deployed app's **Manage app → Settings → Secrets**. "
+            "Replace only `TE_QWEN_API_KEY` and `TE_GROQ_API_KEY`.\n"
+            "3. **Save** the secrets, then **Reboot app**.\n"
+            "4. Come back here to check credentials; then open Evidence studio and "
+            "click **Re-run AI analysis on this clip**.\n\n"
+            "Keys saved only in GitHub/Codespaces are **not** copied to Streamlit. "
+            "Never paste the keys into this page, source code or chat."
+        )
+    if st.button("Test API credentials (no video sent)", type="secondary",
+                 use_container_width=True):
+        from services.api.provider_status import check_provider_credentials
+        for provider in ("OpenRouter", "Groq"):
+            outcome = check_provider_credentials(provider)
+            label = provider + ": " + outcome["message"]
+            if outcome["status"] == "valid":
+                st.success(label)
+            elif outcome["status"] in ("invalid", "error"):
+                st.error(label)
+            else:
+                st.warning(label)
+    st.caption("Credential tests verify authentication only. They don't prove that the "
+               "selected Qwen model is available or that violations can be detected.")
     st.info("This no-password demo shows only the current browser session's cases, but "
             "files still live in temporary shared server storage. They are not encrypted "
             "or permanently preserved. Anyone with the URL can consume the limited AI "
