@@ -6,16 +6,18 @@ Never deploy with the development key or expose this service publicly as-is.
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import sqlite3
 import subprocess
 import uuid
 from fractions import Fraction
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -30,9 +32,14 @@ DB = DATA / "traffic.db"
 MAX_BYTES = int(os.environ.get("TE_MAX_UPLOAD_MB", "150")) * 1024 * 1024
 MAX_SOURCE_BYTES = int(os.environ.get("TE_MAX_SOURCE_MB", "512")) * 1024 * 1024
 MAX_SOURCE_SECONDS = int(os.environ.get("TE_MAX_SOURCE_SECONDS", "7200"))
-KEY = os.environ.get("TE_API_KEY", "dev-only-change-me")
-if os.environ.get("TE_ENV", "development") == "production" and KEY == "dev-only-change-me":
+# Remote deployments always require an explicitly configured operator key.
+# A local-only development session does not require anyone to type a key.
+KEY = os.environ.get("TE_API_KEY", "").strip()
+if os.environ.get("TE_ENV", "development") == "production" and not KEY:
     raise RuntimeError("Set a unique TE_API_KEY before using TE_ENV=production")
+if not KEY:
+    KEY = secrets.token_urlsafe(32)  # Never use a known hardcoded remote key.
+
 
 
 
@@ -119,12 +126,49 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Traffic Enhancer API", version="0.1.0", lifespan=lifespan)
 
 
-def authorize(authorization: str | None = Header(default=None)):
+def local_browser_mode(request: Request) -> bool:
+    """Allow keyless access ONLY from a direct loopback browser in development.
+
+    Never trust forwarded traffic, DNS-rebound hostnames, or cross-site requests.
+    Codespaces, VPNs, proxy URLs and production must retain operator-key auth.
+    """
+    if os.environ.get("TE_ENV", "development") != "development":
+        return False
+    if os.environ.get("TE_LOCAL_NO_AUTH", "1") != "1":
+        return False
+    if request.client is None or request.client.host not in {"127.0.0.1", "::1"}:
+        return False
+    if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+    if any(request.headers.get(name) for name in (
+        "forwarded", "x-forwarded-for", "x-forwarded-host", "x-original-host"
+    )):
+        return False
+    if request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
+        return False
+    origin = request.headers.get("origin")
+    if origin:
+        parsed = urlsplit(origin)
+        if parsed.scheme != request.url.scheme or parsed.netloc != request.url.netloc:
+            return False
+    return True
+
+
+def authorize(request: Request, authorization: str | None = Header(default=None)):
+    if local_browser_mode(request):
+        return
     import hmac
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Authentication required")
     if not hmac.compare_digest(authorization[7:].encode(), KEY.encode()):
         raise HTTPException(401, "Invalid operator key")
+
+
+@app.get("/api/v1/session")
+def session(request: Request):
+    # No secret or API key is ever returned to the browser.
+    return {"login_required": not local_browser_mode(request)}
+
 
 
 def evidence_path(row):
