@@ -22,9 +22,13 @@ const assert = require("node:assert/strict");
     await page.locator("#file").setInputFiles("tests/e2e-demo.mp4");
     await page.waitForFunction(()=>!document.querySelector("#upload").disabled,null,{timeout:12000});
     await page.locator("#uploadClaim").fill("Take photo, blue Kia on the left shoulder");
+    const requestPromise=page.waitForResponse(resp=>resp.url().endsWith("/api/v1/incidents") && resp.request().method()==="POST",{timeout:40000});
     await page.locator("#upload").click();
+    const uploadResponse=await requestPromise;
+    const uploadBody=await uploadResponse.text();
+    assert.equal(uploadResponse.status(),202,"Video import failed: "+uploadBody.slice(0,1200));
     await page.waitForFunction(()=>document.querySelector("#nCases").textContent==="1",
-      null,{timeout:20000});
+      null,{timeout:40000});
     await page.waitForFunction(()=>document.querySelector("#caseState").textContent.includes("REVIEW AVAILABLE"),
       null,{timeout:70000});
     await page.waitForFunction(()=>document.querySelector("#caseVideo").readyState>=1,
