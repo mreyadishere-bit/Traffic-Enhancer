@@ -586,15 +586,27 @@ def render_case_detail(selected):
             if vision_state.get("routing")=="OpenRouter free multimodal router":
                 st.caption("Free auto-router selected the actual model shown above. "
                            "It may not be Qwen.")
-        elif vision_state.get("status")=="failed":
-            st.caption("404 can mean an unavailable model or an account/provider "
-                       "routing restriction. The no-cost fallback is automatic on "
-                       "new requests; old failures need visual-only retry.")
+        elif vision_state.get("status") in ("failed","unparseable"):
+            issue=str(vision_state.get("diagnostic_code") or "")
+            if issue in ("empty_completion","output_token_limit",
+                         "reasoning_without_answer","no_completion_choices",
+                         "missing_message"):
+                st.warning("The remote vision provider returned HTTP 200 but no "
+                           "usable final text ("+issue+"). This is NOT proof "
+                           "that the recording has no violation.")
+            elif issue=="invalid_json_scene_report":
+                st.warning("The vision model returned text, but it was not "
+                           "a valid evidence report. No offense was inferred.")
+            elif issue=="provider_error_in_success_reply":
+                st.warning("The remote provider embedded an error in its reply. "
+                           "It was not treated as a successful analysis.")
+            else:
+                st.caption("Provider routing may be unavailable or restricted by "
+                           "OpenRouter privacy settings, or the response was invalid.")
         if vision_state.get("status") in ("failed","unparseable"):
             st.info("This is the last SAVED visual result, not a live request. "
-                    "HTTP 404 may mean that OpenRouter cannot route to a provider "
-                    "allowed by your account's privacy settings. Retry visual AI "
-                    "here without repeating the YOLO video analysis.")
+                    "You can retry the visual model without repeating YOLO, "
+                    "OCR or annotated video generation.")
         if selected["status"]=="ready":
             if st.button("Retry visual AI only · keep YOLO and full video",
                          key="retry_visual_only",use_container_width=True,
