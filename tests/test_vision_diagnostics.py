@@ -103,7 +103,7 @@ def test_cpu_probe_executes_both_real_model_interfaces_on_synthetic_image(monkey
     result=cpu_detector_readiness(
         predict=fake_predict,which=lambda _: "/usr/bin/tesseract",
         run=lambda *args,**kwargs: subprocess.CompletedProcess(
-            args[0],0,"List of available languages:\\neng\\nara\\n",""))
+            args[0],0,"List of available languages:\neng\nara\n",""))
     assert visited == [("vehicle",(320,192)),("plate",(320,192))]
     assert result["vehicle"]["status"]=="ready"
     assert result["plate"]["status"]=="ready"
