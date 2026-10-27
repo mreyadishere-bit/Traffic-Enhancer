@@ -431,6 +431,36 @@ def reanalyze(incident_id: str, background: BackgroundTasks):
     return {"id": incident_id, "status": "queued"}
 
 
+@app.post("/api/v1/incidents/{incident_id}/retry-vision",
+          dependencies=[Depends(authorize)])
+def retry_vision_only(incident_id: str):
+    """Re-run only remote image reasoning, retaining the original YOLO/ASR/MP4.
+
+    This is deliberately separate from /reanalyze: it does not erase the
+    incident, original evidence hashes, OCR, tracking or derived video assets.
+    """
+    from .qwen import describe_video
+    from .assessment import assess_potential_events
+    row=read_incident(incident_id)
+    if row["status"]!="ready" or not row["analysis_json"]:
+        raise HTTPException(409,"Run initial analysis before retrying visual reasoning")
+    original=json.loads(row["analysis_json"])
+    claim=original.get("driver_claim") or {}
+    result=describe_video(evidence_path(row),float(row["duration"]),claim)
+    original["visual_reasoning"]=result
+    original["violation_assessment"]=assess_potential_events(claim,result)
+    with connect() as db:
+        update=db.execute(
+            "UPDATE incidents SET analysis_json=? WHERE id=? AND status='ready' AND analysis_json=?",
+            (json.dumps(original,ensure_ascii=False),incident_id,row["analysis_json"]))
+        if update.rowcount != 1:
+            raise HTTPException(409,"Case changed while vision retry was running")
+    return {"id":incident_id,"status":"ready",
+            "vision_status":result.get("status","failed"),
+            "actual_model":result.get("model"),
+            "note":result.get("note","")[:220]}
+
+
 @app.get("/api/v1/incidents/{incident_id}/report", dependencies=[Depends(authorize)])
 def get_report(incident_id: str):
     row = read_incident(incident_id)
