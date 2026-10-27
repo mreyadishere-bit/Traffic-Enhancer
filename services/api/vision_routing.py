@@ -21,7 +21,8 @@ def no_cost_model(model: str) -> bool:
 def _free_price(item: dict) -> bool:
     price = item.get("pricing") or {}
     try:
-        return float(price.get("prompt","1")) == 0 and float(price.get("completion","1")) == 0
+        return (all(float(price.get(k,"1")) == 0 for k in ("prompt","completion"))
+                and all(float(price.get(k,"0")) == 0 for k in ("image","request")))
     except (TypeError, ValueError):
         return False
 
@@ -43,17 +44,47 @@ def free_qwen_vision_options(items) -> list[str]:
     return matches[:3]
 
 
-def fetch_free_qwen_options(get=None) -> list[str]:
-    """Best-effort public catalog read, no video or key is sent."""
+def free_vision_options(items) -> list[str]:
+    """Select ONLY catalog-confirmed zero-priced image-input model IDs.
+
+    This is an *availability candidate*, not proof a given key is permitted to
+    route to that model. Prefer Qwen when available, then general vision models.
+    """
+    choices=[]
+    for item in items if isinstance(items,list) else []:
+        if not isinstance(item,dict):
+            continue
+        slug=item.get("id")
+        modalities=((item.get("architecture") or {}).get("input_modalities") or
+                    item.get("input_modalities") or [])
+        if (isinstance(slug,str) and slug.endswith(":free") and "/" in slug
+                and "image" in modalities and _free_price(item)):
+            choices.append(slug)
+    choices=sorted(set(choices),key=lambda slug:(
+        slug!=PREFERRED_QWEN,
+        not slug.startswith("qwen/"),
+        slug!="nvidia/nemotron-3.5-super-vl:free",
+        slug))
+    return choices[:24]
+
+
+def fetch_free_vision_options(get=None) -> list[str]:
+    """Best-effort public catalog read; no video, key or images are sent."""
     if get is None:
         get=httpx.get
     try:
         reply=get(OPENROUTER_BASE+"/models?input_modalities=image",
                   timeout=httpx.Timeout(12,connect=5))
         reply.raise_for_status()
-        return free_qwen_vision_options(reply.json().get("data",[]))
-    except (httpx.HTTPError,ValueError,KeyError,AttributeError):
+        return free_vision_options(reply.json().get("data",[]))
+    except (httpx.HTTPError,ValueError,KeyError,AttributeError,TypeError):
         return []
+
+
+def fetch_free_qwen_options(get=None) -> list[str]:
+    """Backward-compatible Qwen-only subset of the public free vision catalog."""
+    return [slug for slug in fetch_free_vision_options(get=get)
+            if slug.startswith("qwen/")][:3]
 
 
 class RoutingFailure(Exception):
@@ -65,7 +96,7 @@ class RoutingFailure(Exception):
 
 def request_free_vision(endpoint: str, headers: dict, content: list,
                         model: str, *, post=None, get=None):
-    """Bounded fallback: max 1 preferred + 1 alternate Qwen + free router."""
+    """Bounded fallback: max 1 preferred + 1 free image alternate + free router."""
     if post is None:
         post=httpx.post
     if not no_cost_model(model):
@@ -80,16 +111,19 @@ def request_free_vision(endpoint: str, headers: dict, content: list,
         response=post(endpoint,headers=headers,
                       json={"model":current,"messages":[{"role":"user","content":content}],
                             "max_tokens":450,"temperature":0},
-                      timeout=httpx.Timeout(180,connect=10))
+                      timeout=httpx.Timeout(75,connect=8,read=70,write=30))
         code=getattr(response,"status_code",200)
         if code==404:
             if current != FREE_ROUTER:
                 if len(tried)==1:
-                    options=fetch_free_qwen_options(get=get)
-                    next_qwen=next((slug for slug in options
+                    # A 404 may mean Qwen was retired or this account has no
+                    # allowed Qwen provider. Prefer another *catalog-verified*
+                    # free image model; then try OpenRouter's free router.
+                    options=fetch_free_vision_options(get=get)
+                    alternate=next((slug for slug in options
                                     if slug not in tried and slug!=FREE_ROUTER),None)
-                    if next_qwen:
-                        queue.append(next_qwen)
+                    if alternate:
+                        queue.append(alternate)
                 if FREE_ROUTER not in queue and FREE_ROUTER not in tried:
                     queue.append(FREE_ROUTER)
             continue
