@@ -52,7 +52,7 @@ def test_pdf_explains_completed_without_readable_plates():
     assert "nvidia/nemotron-3.5-super-vl:free" in text
     assert "QWEN2.5-VL" not in text
     assert "Plate OCR candidates" in text
-    assert "No plate string is verified" in text
+    assert "No plate string is verified" in " ".join(text.split())
     assert "26" in text
     assert "82" in text
     assert "53" in text
