@@ -12,7 +12,17 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 
 
-def build_report(incident, preview_path=None):
+def report_model_name(vision: dict) -> str:
+    """Use the actually reported provider model, never assume Qwen was served."""
+    if not isinstance(vision, dict):
+        return "Unavailable"
+    name = vision.get("model")
+    if name and isinstance(name, str):
+        return name[:110]
+    return "Not reported"
+
+
+def build_report(incident, preview_path=None, annotated_path=None):
     output = BytesIO()
     c = canvas.Canvas(output, pagesize=A4)
     width, height = A4
@@ -80,16 +90,24 @@ def build_report(incident, preview_path=None):
     claim = info.get("driver_claim") or {}
     qwen = info.get("visual_reasoning") or {}
     assessment = info.get("violation_assessment") or {}
+    full_clip = info.get("full_length_video") or {}
+    plate_candidates = ocr.get("candidates") or []
+    actual_model = report_model_name(qwen)
 
     section("Executive assessment / incomplete until human review")
     row("Review state", info.get("review_status", "unreviewed"))
     row("Vision reasoning", qwen.get("status", "not_configured"))
+    row("Actual vision model", actual_model)
     row("Potential event count", len(assessment.get("candidates") or []))
-    row("Tracking IDs", len(track.get("tracks") or []))
+    row("Provisional track IDs", len(track.get("tracks") or []))
     row("Stored detections", len((info.get("vehicle_detection") or {}).get("detections") or []))
-    paragraph("Frame detections count boxes across multiple sampled frames (capped at 250 in stored output); "
-              "tracking IDs can change and do not prove a unique number of vehicles. "
-              "No official violation is established.")
+    row("Plate OCR candidates", len(plate_candidates))
+    if full_clip.get("status") == "completed":
+        row("Real YOLO sample frames", full_clip.get("analyzed_frames", "Not reported"))
+        row("YOLO inference FPS", full_clip.get("inference_fps", "Not reported"))
+    paragraph("Frame detections count boxes across multiple sampled frames (capped at 250 in stored output). "
+              "Provisional track IDs can change and are NOT distinct verified vehicles. "
+              "OCR candidates are NOT confirmed plate strings. No official violation is established.")
 
     section("Evidence integrity")
     for label, value in (
@@ -122,14 +140,30 @@ def build_report(incident, preview_path=None):
         c.drawImage(reader, 42, y - display_h, width=display_w, height=display_h,
                     mask="auto")
         y -= display_h + 10
-        paragraph("Image is taken directly from the uploaded video. This single frame does not prove a traffic offense.")
+        paragraph("Actual unannotated frame extracted from the selected analyzed clip. "
+                  "It does not establish a traffic offense or verify camera provenance.")
+
+    if annotated_path is not None and annotated_path.is_file():
+        ensure(266)
+        section("YOLO vehicle overlay - actual sampled frame")
+        reader = ImageReader(str(annotated_path))
+        natural_w, natural_h = reader.getSize()
+        scale = min(505 / natural_w, 195 / natural_h)
+        display_w, display_h = natural_w * scale, natural_h * scale
+        c.drawImage(reader, 42, y - display_h, width=display_w, height=display_h, mask="auto")
+        y -= display_h + 10
+        paragraph("Boxes represent preliminary detector predictions on one sampled frame. "
+                  "IDs are provisional; no calibrated speed or physical distance is inferred. "
+                  "The complete annotated MP4 is a separate derived file, not embedded in this PDF.")
 
     section("AI execution state")
     for label, value in (
         ("Speech", speech.get("status")),
         ("Video tracker", track.get("status")),
-        ("Qwen2.5-VL", qwen.get("status")),
-        ("Egyptian plate OCR", ocr.get("status")),
+        ("Visual AI inference", qwen.get("status")),
+        ("Actual model", actual_model),
+        ("Plate locator + OCR", ocr.get("status")),
+        ("Readable OCR candidates", len(plate_candidates)),
         ("Incident assessment", assessment.get("status")),
         ("Human review", info.get("review_status")),
     ):
@@ -139,7 +173,7 @@ def build_report(incident, preview_path=None):
     errors = 0
     for name, stage in (
         ("Speech", speech), ("Tracking", track),
-        ("Qwen2.5-VL", qwen), ("Plate OCR", ocr)
+        ("Visual AI", qwen), ("Plate OCR", ocr)
     ):
         status = stage.get("status", "unavailable")
         if status in ("failed", "unparseable", "not_configured"):
@@ -147,7 +181,8 @@ def build_report(incident, preview_path=None):
             paragraph(name + " (" + status + "): " +
                       str(stage.get("note") or "Model was not configured or completed."))
     if not errors:
-        paragraph("No reported model execution failures. Accuracy remains unverified.")
+        paragraph("No reported runtime stage failures. This does NOT verify OCR plate readability, "
+                  "model accuracy, or the absence of traffic violations.")
 
     section("Driver-stated description - unverified")
     paragraph(claim.get("verbatim") or "No usable audio description was available.")
@@ -164,11 +199,15 @@ def build_report(incident, preview_path=None):
                       f"AI observation: {item.get('visual_evidence')}. "
                       f"Uncertainty: {item.get('uncertainty')}. Human review required.")
     section("License plate / vehicle information")
-    paragraph(f"Plate OCR candidates: {len(ocr.get('candidates', []))}. "
+    paragraph(f"Plate OCR candidates: {len(plate_candidates)}. "
+              "The generic plate locator is not validated specifically on Egyptian registrations. "
+              "OCR execution marked completed does NOT mean characters were read. "
               "No plate string is verified. No vehicle owner or official registry was queried.")
     section("Evidence-handling limitations")
     paragraph("AI may be mistaken about traffic signals, road boundaries, vehicle identity, and object motion. "
               "Video frames may be sampled, so crucial transitions could be absent.")
+    paragraph("The video report includes real sampled frames; it cannot establish physical speed "
+              "or distance without calibrated geometry, verified timestamps and reliable tracking.")
     paragraph("Original uploaded file must be reviewed for any real-world decision. "
               "Recording time and GPS are not inferred from upload metadata. "
               "A SHA-256 hash verifies only the stored uploaded bytes, not camera provenance.")
