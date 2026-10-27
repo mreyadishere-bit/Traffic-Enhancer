@@ -25,9 +25,11 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+      - name: Install FFmpeg for full-duration video fixture
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install Python dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Syntax check and Streamlit AppTest
         run: |
           python -m compileall -q streamlit_app.py
-          python -m pytest -q tests/test_streamlit_cloud.py tests/test_cloud_vision.py
+          python -m pytest -q tests/test_streamlit_cloud.py tests/test_cloud_vision.py tests/test_full_video.py

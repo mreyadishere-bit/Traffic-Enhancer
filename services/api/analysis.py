@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from .visual_evidence import render_sampled_evidence
+from .full_video import make_annotated_full_clip
 from .intent import parse_driver_claim
 from .tracker import track_vehicles
 from .qwen import describe_video
@@ -138,6 +139,13 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
     progress('rendering_annotated_evidence')
     visual_evidence = render_sampled_evidence(
         original, preview.parent, preview.stem, tracking, plates)
+    # Produce the full selected clip at authentic sampled source times;
+    # independent of Qwen/Groq credentials or inferred traffic violations.
+    progress('starting_full_length_annotation')
+    full_video = (make_annotated_full_clip(
+        original, preview.parent, preview.stem, duration,
+        progress=progress) if __import__("os").getenv("TE_CLOUD_VISION","0") == "1"
+        else {"status":"not_configured"})
     progress('reconciling_evidence')
     target = match_target(claim, tracking)
     assessment = assess_potential_events(claim, qwen)
@@ -166,6 +174,7 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
         },
         "visual_reasoning": qwen,
         "annotated_evidence": visual_evidence,
+        "full_length_video": full_video,
         "target_matching": target,
         "plate_recognition": plates,
         "violation_assessment": assessment,
