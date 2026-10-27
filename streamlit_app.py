@@ -187,7 +187,9 @@ def date_label(raw):
         return "Unknown"
 
 def upload_and_analyze(blob: bytes, name: str, start: float, end: float, untrimmed: bool):
-    form = {} if untrimmed else {"start_seconds": str(start), "end_seconds": str(end)}
+    form = {"defer_processing": "true"}
+    if not untrimmed:
+        form.update({"start_seconds": str(start), "end_seconds": str(end)})
     suffix = Path(name).suffix.lower()
     kind = {".mp4": "video/mp4", ".mov": "video/quicktime",
             ".mkv": "video/x-matroska"}[suffix]
@@ -198,34 +200,111 @@ def upload_and_analyze(blob: bytes, name: str, start: float, end: float, untrimm
     )
     return result.json()
 
-@st.fragment(run_every="4s")
-def pending_work():
-    future = st.session_state.get("pending_work")
-    if future is None:
-        return
-    if not future.done():
-        st.info("Analyzing your recording. The original clip and hash are kept in this temporary demo session. This can be slow on free cloud CPU.")
-        return
-    st.session_state.pending_work = None
+@st.cache_resource
+def render_progress():
+    return {"lock": threading.Lock(), "cases": {}}
+
+
+def process_case(case_id):
+    """API job status is written by backend.analyze_record into SQLite."""
+    backend.analyze_record(case_id)
+    return case_id
+
+
+def prepare_full_video(case_id, seconds):
+    from services.api.full_video import make_annotated_full_clip
+    progress=render_progress()
+    def notify(stage):
+        with progress["lock"]:
+            progress["cases"][case_id]=stage
     try:
-        result = future.result()
-        if st.session_state.pop("pending_kind", "") == "upload":
-            incident_id = result.get("id") if isinstance(result, dict) else None
-            if incident_id and re.fullmatch(r"[0-9a-f]{32}", str(incident_id)):
-                if incident_id not in st.session_state.te_case_ids:
-                    st.session_state.te_case_ids.append(incident_id)
-        st.session_state.last_result = ("success", result)
-    except Exception as exc:
-        st.session_state.last_result = ("error", str(exc)[:500])
-    st.rerun()
+        record=backend.read_incident(case_id)
+        path=backend.evidence_path(record)
+        return make_annotated_full_clip(path,backend.DERIVED,case_id,seconds,
+                                        progress=notify)
+    finally:
+        with progress["lock"]:
+            progress["cases"].pop(case_id,None)
+
+
+@st.fragment(run_every="3s")
+def pending_work():
+    """Automatic progress polling, including the actual API processing stage."""
+    future=st.session_state.get("pending_work")
+    if future is not None:
+        if not future.done():
+            st.info("Uploading and trimming the selected source video…")
+            return
+        st.session_state.pending_work=None
+        try:
+            record=future.result()
+            incident_id=record.get("id") if isinstance(record,dict) else None
+            if not incident_id or not re.fullmatch(r"[0-9a-f]{32}",incident_id):
+                raise RuntimeError("Upload did not return a valid case ID.")
+            if incident_id not in st.session_state.te_case_ids:
+                st.session_state.te_case_ids.append(incident_id)
+            st.session_state.active_case_id=incident_id
+            # The API saved the video but deferred processing. Execute it
+            # independently so the UI can inspect live SQLite stage updates.
+            st.session_state.processing_case_id=incident_id
+            st.session_state.processing_future=jobs().submit(process_case,incident_id)
+            st.rerun()
+        except Exception as exc:
+            st.session_state.last_result=("error",str(exc)[:350])
+            st.rerun()
+    active=st.session_state.get("processing_case_id")
+    if active:
+        try:
+            record=api_request("GET",f"/incidents/{active}",timeout=15).json()
+            stage=str(record.get("stage") or "queued")
+            state=str(record.get("status") or "queued")
+            if state not in ("ready","failed"):
+                pct=None
+                if stage.startswith("annotating_video:"):
+                    try:
+                        done,total=[int(n) for n in stage.split(":")[1].split("/")]
+                        pct=min(95,round(35+55*done/max(1,total)))
+                    except (TypeError,ValueError,ZeroDivisionError):
+                        pct=None
+                if pct is not None:
+                    st.progress(pct,text=f"YOLO full-clip rendering: {stage.split(':')[1]} real frames")
+                else:
+                    st.info(f"Automatically processing: {stage.replace('_',' ')}")
+                return
+            st.session_state.processing_case_id=None
+            st.session_state.processing_future=None
+            st.session_state.last_result=("success",{"id":active,"status":state})
+            st.rerun()
+        except Exception:
+            st.info("Reading current analysis progress…")
+            return
+    render_future=st.session_state.get("pending_render")
+    if render_future is not None:
+        case_id=st.session_state.get("pending_render_case_id")
+        if not render_future.done():
+            with render_progress()["lock"]:
+                step=render_progress()["cases"].get(case_id,"preparing frames")
+            st.info(f"Building a full-duration video from actual YOLO detections: {step}")
+            return
+        st.session_state.pending_render=None
+        try:
+            outcome=render_future.result()
+            if outcome.get("status")=="completed":
+                st.session_state.last_result=("render_success",outcome)
+            else:
+                st.session_state.last_result=("error",outcome.get("note","Video export failed"))
+        except Exception as exc:
+            st.session_state.last_result=("error",f"Full clip failed: {type(exc).__name__}")
+        st.rerun()
+
 
 with st.sidebar:
     st.markdown("### ◈ TRAFFIC ENHANCER")
     st.caption("PRELIMINARY EVIDENCE INTELLIGENCE")
     area = st.radio(
         "WORKSPACE",
-        ["Overview", "New analysis", "Evidence studio", "Incident library", "System health"],
-        label_visibility="collapsed",
+        ["New analysis", "Evidence studio", "Incident library", "Overview", "System health"],
+        index=0, label_visibility="collapsed",
     )
     st.divider()
     st.caption("No sign-in required. Case lists are per browser session; files have no durable backup.")
@@ -237,7 +316,9 @@ pending_work()
 last_result = st.session_state.pop("last_result", None)
 if last_result:
     if last_result[0] == "success":
-        st.success(f"Recording analyzed and saved as case {last_result[1]['id'][:12]}. Open Evidence studio to inspect real results.")
+        st.success("Analysis finished — results shown on this page below.")
+    elif last_result[0] == "render_success":
+        st.success("Full-length annotated video ready below.")
     else:
         st.error("Analysis failed: " + str(last_result[1]))
 
@@ -250,6 +331,177 @@ except Exception as exc:
 ready = sum(x["status"] == "ready" for x in incident_list)
 processing = sum(x["status"] in ("processing", "queued") for x in incident_list)
 failed = sum(x["status"] == "failed" for x in incident_list)
+
+def render_case_detail(selected):
+    """Shared actual-evidence viewer in the one-page flow and case library."""
+    selected_id=selected["id"]
+    a=selected.get("analysis") or {}
+    st.caption(f"Case {selected_id.upper()} · {selected['status'].upper()} · {selected.get('stage','')}")
+    if selected.get("error"):
+        st.error(selected["error"])
+    first,inspector=st.columns([1.6,1],gap="large")
+    with first:
+        st.markdown("### Annotated evidence viewer")
+        st.caption("Bounding boxes are from real sampled source frames, not "
+                   "fictional continuous tracking.")
+        # Recover the annotated media from existing saved YOLO results;
+        # this NEVER calls OpenRouter/Groq or re-runs neural inference.
+        saved_detections=(a.get("vehicle_detection") or {}).get("detections") or []
+        cached_movie=backend.DERIVED/(selected_id+".samples.mp4")
+        if not cached_movie.is_file() and saved_detections:
+            if st.button("Generate boxes from saved detections · no API usage",
+                         key="offline_annotations",use_container_width=True):
+                from services.api.visual_evidence import render_sampled_evidence
+                with st.spinner("Drawing boxes on actual source timestamps…"):
+                    result=render_sampled_evidence(
+                        backend.evidence_path(backend.read_incident(selected_id)),
+                        backend.DERIVED,selected_id,
+                        {"detections": saved_detections,
+                         "tracks": (a.get("object_tracking") or {}).get("tracks",[])},
+                        a.get("plate_recognition") or {})
+                    if result["status"]!="completed":
+                        st.warning(result.get("note","Could not create montage"))
+                    else:
+                        st.rerun()
+        viz=a.get("annotated_evidence") or {}
+        preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
+        preview_movie=backend.DERIVED/(selected_id+".samples.mp4")
+        if preview_movie.is_file():
+            st.video(preview_movie.read_bytes(),format="video/mp4")
+            st.caption("Sampled-frame review montage: each image is a REAL "
+                       "timestamped YOLO observation held for 1 second. "
+                       "Not continuous full-video tracking; no interpolated boxes.")
+            st.download_button("Download annotated sampled video",
+                               data=preview_movie.read_bytes(),
+                               file_name=f"traffic-samples-{selected_id[:10]}.mp4",
+                               mime="video/mp4",key="annotated_download")
+        elif preview_image.is_file():
+            st.image(str(preview_image),use_container_width=True,
+                     caption="Detected boxes on real sampled source frame")
+        elif selected["status"]=="ready":
+            st.info("Annotated preview not generated for this analysis. "
+                    "Press Re-run AI analysis to produce annotated media.")
+        if preview_image.is_file() and preview_movie.is_file():
+            with st.expander("Annotated still frame · preview and JPG download"):
+                st.image(str(preview_image),
+                         caption="Original frame with actual detection rectangles",
+                         use_container_width=True)
+                st.download_button(
+                    "Download annotated JPG",
+                    data=preview_image.read_bytes(),
+                    file_name=f"traffic-detections-{selected_id[:10]}.jpg",
+                    mime="image/jpeg",key="annotated_jpg_download")
+        sampled=(a.get("vehicle_detection") or {}).get("detections") or []
+        if sampled:
+            from collections import Counter
+            by_time=Counter(round(float(d["second"]),2)
+                            for d in sampled if isinstance(d.get("second"),(int,float)))
+            if by_time:
+                import pandas as pd
+                table=pd.DataFrame([{"Sample second":sec,"Vehicles detected":n}
+                                    for sec,n in sorted(by_time.items())])
+                st.caption(f"{len(sampled)} vehicle detections across "
+                           f"{len(by_time)} sampled source timestamps. "
+                           "Not continuous vehicle counts.")
+                st.line_chart(table.set_index("Sample second"),height=180)
+        if viz.get("note"):
+            st.caption(viz["note"])
+        from services.api.visual_evidence import provisional_pixel_motion
+        moves=viz.get("motion_metrics") or provisional_pixel_motion(
+            (a.get("object_tracking") or {}).get("tracks") or [])
+        st.markdown("#### Motion measurements · image-plane only")
+        if moves:
+            st.dataframe(
+                [{"Track (provisional)":m["track_id"],"Vehicle":m["vehicle"],
+                  "Samples":m["observations"],
+                  "Path (pixels)":m["image_path_px"],
+                  "Motion (px/s)":m["image_motion_px_s"],
+                  "Speed (km/h)":"N/A — uncalibrated",
+                  "Ground distance":"N/A — uncalibrated"}
+                 for m in moves],hide_index=True,use_container_width=True)
+            from services.api.visual_evidence import motion_csv
+            st.download_button("Download measured pixel-motion CSV",
+                               data=motion_csv(moves),
+                               file_name=f"motion-{selected_id[:10]}.csv",
+                               mime="text/csv",key="motion_download")
+        else:
+            st.caption("At least two detections matched to the same provisional "
+                       "track are required for pixel-motion measurements.")
+        st.info("Real-world speed and distance require a calibrated stationary "
+                "camera, known ground-plane geometry and reliable track IDs. "
+                "Uncalibrated px/s is NOT km/h; do not use it as evidence of speeding.")
+        with st.expander("View the unaltered original video and source frame"):
+            try:
+                media=backend.evidence_path(backend.read_incident(selected_id))
+                if media.is_file():
+                    st.video(str(media))
+                else:
+                    st.warning("Original is no longer on this temporary Cloud instance.")
+            except Exception as exc:
+                st.warning("Original unavailable: "+str(exc)[:180])
+            thumb=backend.DERIVED/(selected_id+".jpg")
+            if thumb.is_file():
+                st.image(str(thumb),caption="Unannotated original source frame",
+                         use_container_width=True)
+        st.markdown("#### Relevant model observations")
+        observation=(a.get("visual_reasoning") or {}).get("observations") or {}
+        st.write(observation.get("scene_summary") or "No visual scene interpretation is available.")
+        events=(a.get("violation_assessment") or {}).get("candidates") or []
+        if events:
+            st.dataframe(events,use_container_width=True,hide_index=True)
+        else:
+            st.caption("No supported candidate events. This is not evidence that the recording contains no offense.")
+        tracking = a.get("object_tracking") or {}
+        detections = (a.get("vehicle_detection") or {}).get("detections") or []
+        tracks = tracking.get("tracks") or []
+        st.markdown("#### Actual YOLO vehicle detections")
+        if detections:
+            st.dataframe(
+                [{"Second":d.get("second"),"Vehicle":d.get("label"),
+                  "Confidence":d.get("confidence"),"Provisional track":d.get("track_id"),
+                  "Bounding box":d.get("box_xyxy")} for d in detections[:80]],
+                hide_index=True,use_container_width=True
+            )
+        else:
+            st.caption("No vehicles detected in sampled frames, or the detector could not run.")
+        st.caption(f"{len(tracks)} provisional track IDs. Sparse IoU associations "
+                   "are not verified vehicle identities and are NOT BoT-SORT.")
+        plates = a.get("plate_recognition") or {}
+        st.markdown("#### Arabic license-plate OCR candidates (Egypt format requires review)")
+        st.caption(f"Detected plate regions: {plates.get('plates_detected',0)} · "
+                   "No OCR reading is automatically confirmed.")
+        if plates.get("candidates"):
+            st.dataframe(plates["candidates"],hide_index=True,use_container_width=True)
+        else:
+            st.caption("No readable plate candidates at these distances or lighting conditions.")
+    with inspector:
+        st.markdown("#### AI processing stages")
+        stage_status(st,"Vehicle tracking",a.get("object_tracking"))
+        stage_status(st,"Driver speech",a.get("transcription"))
+        stage_status(st,"Qwen vision reasoning",a.get("visual_reasoning"))
+        stage_status(st,"Egyptian plate OCR",a.get("plate_recognition"))
+        stage_status(st,"Potential violation review",a.get("violation_assessment"))
+        if selected["status"] in ("ready","failed"):
+            if st.button("Re-run AI analysis on this clip",use_container_width=True):
+                if reserve_demo_analysis():
+                    st.session_state.pending_kind = "rerun"
+                    st.session_state.pending_work=jobs().submit(
+                        lambda: api_request("POST",f"/incidents/{selected_id}/reanalyze",
+                                            timeout=360).json())
+                    st.rerun()
+                else:
+                    st.warning("Public demo processing limit reached.")
+        if selected["status"]=="ready":
+            try:
+                pdf=api_request("GET",f"/incidents/{selected_id}/report.pdf").content
+                st.download_button(
+                    "Download preliminary PDF",
+                    data=pdf, file_name=f"traffic-report-{selected_id[:12]}.pdf",
+                    mime="application/pdf",use_container_width=True)
+            except Exception as exc:
+                st.warning("PDF export unavailable: "+str(exc)[:180])
+        st.caption("AI guesses must always be reviewed against the original video. Never treat a suggested incident as an official finding.")
+
 
 if area == "Overview":
     st.markdown('<div class="kicker">EVIDENCE INTELLIGENCE / OVERVIEW</div>', unsafe_allow_html=True)
@@ -417,7 +669,8 @@ elif area == "New analysis":
                     key="analyze_clip",
                     type="primary", use_container_width=True,
                     disabled=selection_error is not None or
-                             st.session_state.get("pending_work") is not None,
+                             st.session_state.get("pending_work") is not None or
+                             st.session_state.get("processing_case_id") is not None,
                     on_click=None,
                 )
                 # The button's clicked value is an ephemeral Streamlit state;
@@ -437,6 +690,20 @@ elif area == "New analysis":
                        "performance is not validated. First run may "
                        "download public ONNX weights. Qwen/Whisper use separate API keys.")
 
+    st.divider()
+    st.markdown("### 05 · Live results & annotated video")
+    if incident_list:
+        labels={x["id"]:f"{x['filename']} · {x['status']} · {x['id'][:8]}" for x in incident_list}
+        default_id=st.session_state.get("active_case_id")
+        ids=list(labels.keys())
+        idx=ids.index(default_id) if default_id in ids else 0
+        chosen_id=st.selectbox("Your recent recordings",ids,index=idx,
+                               format_func=lambda key:labels[key],key="inline_case_select")
+        st.session_state.active_case_id=chosen_id
+        render_case_detail(next(x for x in incident_list if x["id"]==chosen_id))
+    elif st.session_state.get("pending_work") is None:
+        st.caption("Your annotated video and measurements will appear here automatically.")
+
 elif area in ("Evidence studio","Incident library"):
     st.markdown('<div class="kicker">02 / FOOTAGE & ANALYSIS</div>', unsafe_allow_html=True)
     st.header("Evidence studio" if area == "Evidence studio" else "Incident library")
@@ -454,172 +721,7 @@ elif area in ("Evidence studio","Incident library"):
                   "Case ID":x["id"][:12]} for x in incident_list],
                 hide_index=True, use_container_width=True,
             )
-        a=selected.get("analysis") or {}
-        st.caption(f"Case {selected_id.upper()} · {selected['status'].upper()} · {selected.get('stage','')}")
-        if selected.get("error"):
-            st.error(selected["error"])
-        first,inspector=st.columns([1.6,1],gap="large")
-        with first:
-            st.markdown("### Annotated evidence viewer")
-            st.caption("Bounding boxes are from real sampled source frames, not "
-                       "fictional continuous tracking.")
-            # Recover the annotated media from existing saved YOLO results;
-            # this NEVER calls OpenRouter/Groq or re-runs neural inference.
-            saved_detections=(a.get("vehicle_detection") or {}).get("detections") or []
-            cached_movie=backend.DERIVED/(selected_id+".samples.mp4")
-            if not cached_movie.is_file() and saved_detections:
-                if st.button("Generate boxes from saved detections · no API usage",
-                             key="offline_annotations",use_container_width=True):
-                    from services.api.visual_evidence import render_sampled_evidence
-                    with st.spinner("Drawing boxes on actual source timestamps…"):
-                        result=render_sampled_evidence(
-                            backend.evidence_path(backend.read_incident(selected_id)),
-                            backend.DERIVED,selected_id,
-                            {"detections": saved_detections,
-                             "tracks": (a.get("object_tracking") or {}).get("tracks",[])},
-                            a.get("plate_recognition") or {})
-                        if result["status"]!="completed":
-                            st.warning(result.get("note","Could not create montage"))
-                        else:
-                            st.rerun()
-            viz=a.get("annotated_evidence") or {}
-            preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
-            preview_movie=backend.DERIVED/(selected_id+".samples.mp4")
-            if preview_movie.is_file():
-                st.video(preview_movie.read_bytes(),format="video/mp4")
-                st.caption("Sampled-frame review montage: each image is a REAL "
-                           "timestamped YOLO observation held for 1 second. "
-                           "Not continuous full-video tracking; no interpolated boxes.")
-                st.download_button("Download annotated sampled video",
-                                   data=preview_movie.read_bytes(),
-                                   file_name=f"traffic-samples-{selected_id[:10]}.mp4",
-                                   mime="video/mp4",key="annotated_download")
-            elif preview_image.is_file():
-                st.image(str(preview_image),use_container_width=True,
-                         caption="Detected boxes on real sampled source frame")
-            elif selected["status"]=="ready":
-                st.info("Annotated preview not generated for this analysis. "
-                        "Press Re-run AI analysis to produce annotated media.")
-            if preview_image.is_file() and preview_movie.is_file():
-                with st.expander("Annotated still frame · preview and JPG download"):
-                    st.image(str(preview_image),
-                             caption="Original frame with actual detection rectangles",
-                             use_container_width=True)
-                    st.download_button(
-                        "Download annotated JPG",
-                        data=preview_image.read_bytes(),
-                        file_name=f"traffic-detections-{selected_id[:10]}.jpg",
-                        mime="image/jpeg",key="annotated_jpg_download")
-            sampled=(a.get("vehicle_detection") or {}).get("detections") or []
-            if sampled:
-                from collections import Counter
-                by_time=Counter(round(float(d["second"]),2)
-                                for d in sampled if isinstance(d.get("second"),(int,float)))
-                if by_time:
-                    import pandas as pd
-                    table=pd.DataFrame([{"Sample second":sec,"Vehicles detected":n}
-                                        for sec,n in sorted(by_time.items())])
-                    st.caption(f"{len(sampled)} vehicle detections across "
-                               f"{len(by_time)} sampled source timestamps. "
-                               "Not continuous vehicle counts.")
-                    st.line_chart(table.set_index("Sample second"),height=180)
-            if viz.get("note"):
-                st.caption(viz["note"])
-            from services.api.visual_evidence import provisional_pixel_motion
-            moves=viz.get("motion_metrics") or provisional_pixel_motion(
-                (a.get("object_tracking") or {}).get("tracks") or [])
-            st.markdown("#### Motion measurements · image-plane only")
-            if moves:
-                st.dataframe(
-                    [{"Track (provisional)":m["track_id"],"Vehicle":m["vehicle"],
-                      "Samples":m["observations"],
-                      "Path (pixels)":m["image_path_px"],
-                      "Motion (px/s)":m["image_motion_px_s"],
-                      "Speed (km/h)":"N/A — uncalibrated",
-                      "Ground distance":"N/A — uncalibrated"}
-                     for m in moves],hide_index=True,use_container_width=True)
-                from services.api.visual_evidence import motion_csv
-                st.download_button("Download measured pixel-motion CSV",
-                                   data=motion_csv(moves),
-                                   file_name=f"motion-{selected_id[:10]}.csv",
-                                   mime="text/csv",key="motion_download")
-            else:
-                st.caption("At least two detections matched to the same provisional "
-                           "track are required for pixel-motion measurements.")
-            st.info("Real-world speed and distance require a calibrated stationary "
-                    "camera, known ground-plane geometry and reliable track IDs. "
-                    "Uncalibrated px/s is NOT km/h; do not use it as evidence of speeding.")
-            with st.expander("View the unaltered original video and source frame"):
-                try:
-                    media=backend.evidence_path(backend.read_incident(selected_id))
-                    if media.is_file():
-                        st.video(str(media))
-                    else:
-                        st.warning("Original is no longer on this temporary Cloud instance.")
-                except Exception as exc:
-                    st.warning("Original unavailable: "+str(exc)[:180])
-                thumb=backend.DERIVED/(selected_id+".jpg")
-                if thumb.is_file():
-                    st.image(str(thumb),caption="Unannotated original source frame",
-                             use_container_width=True)
-            st.markdown("#### Relevant model observations")
-            observation=(a.get("visual_reasoning") or {}).get("observations") or {}
-            st.write(observation.get("scene_summary") or "No visual scene interpretation is available.")
-            events=(a.get("violation_assessment") or {}).get("candidates") or []
-            if events:
-                st.dataframe(events,use_container_width=True,hide_index=True)
-            else:
-                st.caption("No supported candidate events. This is not evidence that the recording contains no offense.")
-            tracking = a.get("object_tracking") or {}
-            detections = (a.get("vehicle_detection") or {}).get("detections") or []
-            tracks = tracking.get("tracks") or []
-            st.markdown("#### Actual YOLO vehicle detections")
-            if detections:
-                st.dataframe(
-                    [{"Second":d.get("second"),"Vehicle":d.get("label"),
-                      "Confidence":d.get("confidence"),"Provisional track":d.get("track_id"),
-                      "Bounding box":d.get("box_xyxy")} for d in detections[:80]],
-                    hide_index=True,use_container_width=True
-                )
-            else:
-                st.caption("No vehicles detected in sampled frames, or the detector could not run.")
-            st.caption(f"{len(tracks)} provisional track IDs. Sparse IoU associations "
-                       "are not verified vehicle identities and are NOT BoT-SORT.")
-            plates = a.get("plate_recognition") or {}
-            st.markdown("#### Arabic license-plate OCR candidates (Egypt format requires review)")
-            st.caption(f"Detected plate regions: {plates.get('plates_detected',0)} · "
-                       "No OCR reading is automatically confirmed.")
-            if plates.get("candidates"):
-                st.dataframe(plates["candidates"],hide_index=True,use_container_width=True)
-            else:
-                st.caption("No readable plate candidates at these distances or lighting conditions.")
-        with inspector:
-            st.markdown("#### AI processing stages")
-            stage_status(st,"Vehicle tracking",a.get("object_tracking"))
-            stage_status(st,"Driver speech",a.get("transcription"))
-            stage_status(st,"Qwen vision reasoning",a.get("visual_reasoning"))
-            stage_status(st,"Egyptian plate OCR",a.get("plate_recognition"))
-            stage_status(st,"Potential violation review",a.get("violation_assessment"))
-            if selected["status"] in ("ready","failed"):
-                if st.button("Re-run AI analysis on this clip",use_container_width=True):
-                    if reserve_demo_analysis():
-                        st.session_state.pending_kind = "rerun"
-                        st.session_state.pending_work=jobs().submit(
-                            lambda: api_request("POST",f"/incidents/{selected_id}/reanalyze",
-                                                timeout=360).json())
-                        st.rerun()
-                    else:
-                        st.warning("Public demo processing limit reached.")
-            if selected["status"]=="ready":
-                try:
-                    pdf=api_request("GET",f"/incidents/{selected_id}/report.pdf").content
-                    st.download_button(
-                        "Download preliminary PDF",
-                        data=pdf, file_name=f"traffic-report-{selected_id[:12]}.pdf",
-                        mime="application/pdf",use_container_width=True)
-                except Exception as exc:
-                    st.warning("PDF export unavailable: "+str(exc)[:180])
-            st.caption("AI guesses must always be reviewed against the original video. Never treat a suggested incident as an official finding.")
+        render_case_detail(selected)
 
 elif area=="System health":
     st.markdown('<div class="kicker">03 / SYSTEM CAPABILITIES</div>', unsafe_allow_html=True)
