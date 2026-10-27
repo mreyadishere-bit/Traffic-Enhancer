@@ -279,6 +279,14 @@ def pending_work():
             stage=str(record.get("stage") or "queued")
             state=str(record.get("status") or "queued")
             if state not in ("ready","failed"):
+                # The CPU-created MP4 can now exist while optional Qwen is still
+                # processing. Refresh the main viewer once to show it immediately.
+                # Preserve the case's processing status until the backend completes.
+                video_ready=(backend.DERIVED/(active+".tracked.mp4")).is_file()
+                if (video_ready and
+                        st.session_state.get("overlay_revealed_case") != active):
+                    st.session_state.overlay_revealed_case=active
+                    st.rerun()
                 pct=None
                 if stage.startswith("annotating_video:"):
                     try:
@@ -368,6 +376,10 @@ def render_case_detail(selected):
     selected_id=selected["id"]
     a=selected.get("analysis") or {}
     st.caption(f"Case {selected_id.upper()} · {selected['status'].upper()} · {selected.get('stage','')}")
+    if selected["status"] in ("processing","queued") and a:
+        st.info("Analysis is currently processing. The model findings below are "
+                "from the last SAVED run, not the in-progress run. A previously "
+                "failed OpenRouter result is not a new live error.")
     if selected.get("error"):
         st.error(selected["error"])
     first,inspector=st.columns([1.6,1],gap="large")
