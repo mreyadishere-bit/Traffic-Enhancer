@@ -32,4 +32,4 @@ jobs:
       - name: Syntax check and Streamlit AppTest
         run: |
           python -m compileall -q streamlit_app.py
-          python -m pytest -q tests/test_streamlit_cloud.py tests/test_cloud_vision.py tests/test_full_video.py tests/test_overlay_state.py tests/test_vision_routing.py tests/test_visual_retry.py
+          python -m pytest -q tests/test_streamlit_cloud.py tests/test_cloud_vision.py tests/test_full_video.py tests/test_overlay_state.py tests/test_vision_routing.py tests/test_vision_diagnostics.py tests/test_visual_retry.py
