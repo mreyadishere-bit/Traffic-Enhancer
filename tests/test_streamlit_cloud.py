@@ -25,8 +25,8 @@ def test_opens_without_operator_password(tmp_path, monkeypatch):
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception, [str(x.message) for x in app.exception]
     assert not app.text_input
-    assert app.radio and "Overview" in app.radio[0].options
-    assert len(app.metric) >= 4
+    assert app.radio and app.radio[0].value == "New analysis"
+    assert any("Optional clip trimming" in str(x.value) for x in app.markdown)
     assert list(app.session_state["te_case_ids"]) == []
 
 def test_does_not_enumerate_other_browser_cases(tmp_path, monkeypatch):
@@ -40,6 +40,8 @@ def test_does_not_enumerate_other_browser_cases(tmp_path, monkeypatch):
              "f" * 64, 128, 2.0, json.dumps({"width": 320, "height": 180}), "ready"))
     visitor = AppTest.from_file(APP, default_timeout=30).run()
     assert not visitor.exception, [str(x.message) for x in visitor.exception]
+    assert visitor.session_state["te_case_ids"] == []
+    visitor.radio[0].set_value("Overview").run()
     assert visitor.metric[0].value == "0"
     assert not any("other-session-case" in str(x.value) for x in visitor.markdown)
     visitor.session_state["te_case_ids"] = [case_id]
@@ -53,7 +55,7 @@ def test_visitors_do_not_need_any_password_secret(tmp_path, monkeypatch):
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception, [str(x.message) for x in app.exception]
     assert not app.text_input
-    assert app.radio and "Overview" in app.radio[0].options
+    assert app.radio and app.radio[0].value == "New analysis"
 
 
 
@@ -66,3 +68,12 @@ def test_new_analysis_explains_trim_even_before_upload(tmp_path, monkeypatch):
     labels = [str(x.value) for x in app.markdown]
     assert any("Optional clip trimming" in x for x in labels)
     assert any("full" in str(x.value).lower() or "Choose a video" in str(x.value) for x in app.info)
+
+
+
+def test_new_analysis_is_default_single_page(tmp_path,monkeypatch):
+    prepare(tmp_path,monkeypatch)
+    app=AppTest.from_file(APP,default_timeout=30).run()
+    assert not app.exception,[str(e.message) for e in app.exception]
+    assert app.radio[0].value == "New analysis"
+    assert any("Live results" in str(x.value) for x in app.markdown)
