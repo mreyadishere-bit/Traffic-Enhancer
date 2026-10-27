@@ -86,6 +86,8 @@ def describe_video(original: Path, duration: float, claim: dict) -> dict:
                 note = "OpenRouter HTTP 401: check TE_QWEN_API_KEY in Streamlit Secrets."
             elif code == 429:
                 note = "OpenRouter HTTP 429: free inference rate limit reached."
+            elif isinstance(exc, ValueError) and "HTTPS" in str(exc):
+                note = "Remote AI API must use HTTPS or a loopback HTTP endpoint."
             else:
                 note = f"{type(exc).__name__}: model request failed (do not treat it as a violation)."
             return {"status":"failed","model":model_id,
@@ -202,7 +204,7 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
             timeout=httpx.Timeout(240, connect=10)
         )
         actual_model = model_id
-        if (response.status_code == 404 and model_id in legacy_slugs
+        if (getattr(response, "status_code", None) == 404 and model_id in legacy_slugs
                 and api_base.rstrip("/") == "https://openrouter.ai/api/v1"):
             response = httpx.post(
                 endpoint,
