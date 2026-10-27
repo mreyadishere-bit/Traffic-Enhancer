@@ -861,22 +861,87 @@ elif area=="System health":
         with st.container(border=True):
             st.markdown(f"**{title}**")
             st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
-    st.markdown("#### Free visual model availability (no footage sent)")
-    if st.button("Check free Qwen models currently listed on OpenRouter",
-                 use_container_width=True):
-        from services.api.vision_routing import fetch_free_qwen_options
-        options=fetch_free_qwen_options()
-        if options:
-            st.success("Free image-capable Qwen models in the public catalog: " +
-                       ", ".join(options))
+    st.markdown("#### OpenRouter · free image AI diagnostics")
+    st.caption("The public catalog, account-filtered catalog, and live inference "
+               "are three DIFFERENT checks. No road footage is sent here.")
+    from services.api.vision_diagnostics import (
+        catalog_diagnostics, test_free_image_inference
+    )
+    key=os.getenv("TE_QWEN_API_KEY","")
+    diag_store=st.session_state.get("free_vision_diagnostics")
+    left_button,right_button=st.columns(2)
+    with left_button:
+        check_catalog=st.button(
+            "Check free image models + account permissions",
+            use_container_width=True,key="check_vision_catalog")
+    with right_button:
+        check_inference=st.button(
+            "Test my API key with a generated image",
+            use_container_width=True,key="check_vision_probe")
+    st.caption("Catalog check doesn't send video. Image test makes ONE free "
+               "inference request using a generated icon (not your footage); "
+               "it may count toward your daily free request allowance.")
+    if check_catalog:
+        with st.spinner("Reading OpenRouter model catalogs…"):
+            diag_store=catalog_diagnostics(key)
+            st.session_state.free_vision_diagnostics=diag_store
+    if diag_store:
+        public=diag_store["public"]
+        account=diag_store["account"]
+        if public["status"]=="available":
+            count=public["count_free_image"]
+            st.success(f"Public catalog reachable: {count} zero-priced image-capable "
+                       "model variants found.")
+            qwen=public["free_image_qwen"]
+            others=public["free_image_other"]
+            if qwen:
+                st.markdown("**Free image-capable Qwen models**")
+                st.code("\n".join(qwen))
+            else:
+                st.info("No Qwen variant matched the free image catalog filters. "
+                        "This does NOT mean every free image model is unavailable.")
+            if others:
+                with st.expander("Other free image models found"):
+                    st.code("\n".join(others))
+            st.caption("Free automatic image router: openrouter/free "
+                       "(may choose a non-Qwen vision model).")
         else:
-            st.warning("No free Qwen image model found or public catalog unavailable. "
-                       "The app can try OpenRouter's image-capable free router when "
-                       "a Qwen request returns 404.")
-    st.caption("A 404 error may be caused by a retired model, a provider blocked "
-               "by OpenRouter account privacy settings, or no free image-capable "
-               "provider available for your key. A public model listing cannot "
-               "confirm access for your specific key.")
+            st.error("Public catalog failed: "+str(public.get("message","Unknown error")))
+        if account["status"]=="available":
+            st.info(f"Account-filtered list: {account['count_free_image']} free "
+                    "image-capable variants under current provider/privacy rules "
+                    "(not a guarantee of live inference).")
+            with st.expander("Free image models visible to this account"):
+                permitted=account["free_image_qwen"]+account["free_image_other"]
+                st.code("\n".join(permitted) if permitted else "No eligible models listed")
+        elif account["status"]=="not_configured":
+            st.warning("TE_QWEN_API_KEY is missing from Streamlit Secrets.")
+        elif account.get("http_status")==403:
+            st.warning("Account-filtered model endpoint returned 403; some keys "
+                       "cannot use this endpoint. Use the live generated-image test.")
+        elif account.get("http_status")==401:
+            st.error("HTTP 401: OpenRouter rejected your key. Replace "
+                     "TE_QWEN_API_KEY in Streamlit Secrets.")
+        else:
+            st.warning("Account-specific listing failed: " +
+                       str(account.get("message","Unknown reason")))
+    if check_inference:
+        with st.spinner("Testing free image inference (no footage sent)…"):
+            st.session_state.free_vision_probe=test_free_image_inference(key)
+    probe=st.session_state.get("free_vision_probe")
+    if probe:
+        if probe["status"]=="success":
+            st.success(probe["message"])
+            st.caption("Actual responding model: "+probe.get("model","Not reported"))
+            st.info("Your key can use the free image router. For an existing "
+                    "case, use Retry visual AI only; YOLO and video are retained.")
+        elif probe["status"]=="not_configured":
+            st.warning(probe["message"])
+        else:
+            st.error("Free visual inference failed: "+probe["message"])
+    st.caption("HTTP 404 on inference can mean no compatible provider allowed "
+               "by account privacy settings. A public model page alone cannot "
+               "verify access for your key. No paid model is auto-selected.")
     st.warning("Configured means enabled, not validated. The CPU ONNX detectors download "
                "public weights on first analysis and may run slowly on free Cloud. "
                "OCR is tentative. OpenRouter and Groq still require valid secrets.")
