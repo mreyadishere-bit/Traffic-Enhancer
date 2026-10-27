@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .vision_reply import inspect_chat_reply
+
 
 MODEL_DEFAULT = "Qwen/Qwen2.5-VL-3B-Instruct"
 ALLOWED = {"shoulder_driving", "red_light", "littering", "missing_plate"}
@@ -82,9 +84,20 @@ def describe_video(original: Path, duration: float, claim: dict) -> dict:
             code = (exc.status_code if isinstance(exc,RoutingFailure) else
                     getattr(getattr(exc, "response", None), "status_code", None))
             if isinstance(exc, RoutingFailure):
-                note = ("OpenRouter HTTP 404: no available endpoint accepted these free "
-                        "image requests. Tried: " + ", ".join(exc.tried)[:160] +
-                        ". Check model/provider restrictions in OpenRouter and try again later.")
+                if exc.status_code==200:
+                    note = ("Free vision providers did not return a usable final "
+                            "answer (" + exc.reason + "). Tried: " +
+                            ", ".join(exc.tried)[:160] +
+                            ". This is not a traffic-offense finding.")
+                else:
+                    note = ("OpenRouter HTTP 404: no compatible free image provider "
+                            "accepted this request. Tried: " +
+                            ", ".join(exc.tried)[:160] +
+                            ". Check account/provider restrictions.")
+                return {"status":"unparseable" if exc.status_code==200 else "failed",
+                        "model":model_id, "backend":"operator_configured_remote",
+                        "diagnostic_code":exc.reason, "attempted_models":exc.tried,
+                        "observations":None,"note":note}
             elif code == 404:
                 note = ("OpenRouter HTTP 404: model or provider endpoint unavailable. "
                         "Check account privacy/provider restrictions.")
@@ -209,7 +222,8 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
         if api_base.rstrip("/") == "https://openrouter.ai/api/v1":
             from .vision_routing import request_free_vision
             response, actual_model, tried = request_free_vision(
-                endpoint,headers,content,model_id)
+                endpoint,headers,content,model_id,
+                inspect=lambda reply: inspect_chat_reply(reply.json()))
         else:
             response = httpx.post(
                 endpoint,headers=headers,
@@ -220,16 +234,26 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
             actual_model = model_id
             tried = [model_id]
         result = response.json()
-        raw = result["choices"][0]["message"]["content"]
-        if not isinstance(raw, str):
-            raise ValueError("Expected Qwen text response from compatible API")
-        parsed = parse_json_response(raw)
+        actual_served = str(result.get("model") or actual_model)[:110]
+        reply=inspect_chat_reply(result)
+        if reply["status"]!="ok":
+            code=reply["reason"]
+            return {"status":"failed" if reply["status"]=="stop" else "unparseable",
+                    "model":actual_served,"requested_model":model_id,
+                    "backend":"operator_configured_remote",
+                    "diagnostic_code":code,"attempted_models":tried,
+                    "observations":None,
+                    "note":"Vision provider returned no usable answer ("+code+
+                           "). No traffic incident was inferred."}
+        parsed = parse_json_response(reply["text"])
         if parsed is None:
-            return {"status": "unparseable", "model": actual_model,
+            return {"status": "unparseable", "model": actual_served,
+                    "requested_model":model_id,
                     "backend": "operator_configured_remote",
-                    "observations": None,
-                    "note": "Remote model response was not valid expected JSON."}
-        actual_served = result.get("model") or actual_model
+                    "diagnostic_code":"invalid_json_scene_report",
+                    "attempted_models":tried,"observations":None,
+                    "note": "Visual model responded but not in valid scene-report JSON. "
+                            "No incident inferred."}
         return {"status": "completed", "model": actual_served,
                 "requested_model": model_id,
                 "routing": ("OpenRouter free multimodal router" if
