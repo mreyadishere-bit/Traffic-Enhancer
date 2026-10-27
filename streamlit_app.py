@@ -500,6 +500,29 @@ elif area in ("Evidence studio","Incident library"):
             elif selected["status"]=="ready":
                 st.info("Annotated preview not generated for this analysis. "
                         "Press Re-run AI analysis to produce annotated media.")
+            if preview_image.is_file() and preview_movie.is_file():
+                with st.expander("Annotated still frame · preview and JPG download"):
+                    st.image(str(preview_image),
+                             caption="Original frame with actual detection rectangles",
+                             use_container_width=True)
+                    st.download_button(
+                        "Download annotated JPG",
+                        data=preview_image.read_bytes(),
+                        file_name=f"traffic-detections-{selected_id[:10]}.jpg",
+                        mime="image/jpeg",key="annotated_jpg_download")
+            sampled=(a.get("vehicle_detection") or {}).get("detections") or []
+            if sampled:
+                from collections import Counter
+                by_time=Counter(round(float(d["second"]),2)
+                                for d in sampled if isinstance(d.get("second"),(int,float)))
+                if by_time:
+                    import pandas as pd
+                    table=pd.DataFrame([{"Sample second":sec,"Vehicles detected":n}
+                                        for sec,n in sorted(by_time.items())])
+                    st.caption(f"{len(sampled)} vehicle detections across "
+                               f"{len(by_time)} sampled source timestamps. "
+                               "Not continuous vehicle counts.")
+                    st.line_chart(table.set_index("Sample second"),height=180)
             if viz.get("note"):
                 st.caption(viz["note"])
             from services.api.visual_evidence import provisional_pixel_motion
