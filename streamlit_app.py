@@ -50,10 +50,12 @@ os.environ["TE_LOCAL_NO_AUTH"] = "0"
 os.environ.setdefault("TE_DATA_DIR", "/tmp/traffic-enhancer-streamlit")
 os.environ.setdefault("TE_MAX_UPLOAD_MB", "50")
 os.environ.setdefault("TE_MAX_SOURCE_MB", "70")
-# The free cloud has no local GPU. Only remote opt-in providers run.
-os.environ.pop("TE_YOLO_MODEL", None)
+# Lightweight ONNX CPU inference: NO PyTorch/GPU download on Community Cloud.
+# First analysis downloads two small public model files into ephemeral cache.
+os.environ.setdefault("TE_CLOUD_VISION", "1")
+os.environ.setdefault("TE_CLOUD_VISION_FRAMES", "5")
+os.environ.setdefault("TE_CLOUD_PLATE_FRAMES", "5")
 os.environ.pop("TE_ASR_MODEL", None)
-os.environ.pop("TE_PLATE_MODEL", None)
 if os.environ.get("TE_QWEN_API_KEY"):
     os.environ.setdefault("TE_ENABLE_QWEN", "1")
     os.environ.setdefault("TE_QWEN_API_BASE", "https://openrouter.ai/api/v1")
@@ -430,8 +432,10 @@ elif area == "New analysis":
                         st.rerun()
                     else:
                         st.warning("Public demo processing limit reached. Try later or use the local app.")
-                st.caption("Cloud demo: Qwen/Whisper require provider secrets. "
-                           "Free Streamlit Cloud does not run local YOLO or evaluated Egyptian-plate OCR.")
+                st.caption("CPU YOLO detects sampled vehicles and a pretrained generic "
+                       "plate locator feeds tentative Arabic OCR. Egyptian-specific "
+                       "performance is not validated. First run may "
+                       "download public ONNX weights. Qwen/Whisper use separate API keys.")
 
 elif area in ("Evidence studio","Incident library"):
     st.markdown('<div class="kicker">02 / FOOTAGE & ANALYSIS</div>', unsafe_allow_html=True)
@@ -477,8 +481,29 @@ elif area in ("Evidence studio","Incident library"):
                 st.dataframe(events,use_container_width=True,hide_index=True)
             else:
                 st.caption("No supported candidate events. This is not evidence that the recording contains no offense.")
-            tracks=(a.get("object_tracking") or {}).get("tracks") or []
-            st.caption(f"{len(tracks)} provisional tracking IDs; one vehicle may receive multiple IDs.")
+            tracking = a.get("object_tracking") or {}
+            detections = (a.get("vehicle_detection") or {}).get("detections") or []
+            tracks = tracking.get("tracks") or []
+            st.markdown("#### Actual YOLO vehicle detections")
+            if detections:
+                st.dataframe(
+                    [{"Second":d.get("second"),"Vehicle":d.get("label"),
+                      "Confidence":d.get("confidence"),"Provisional track":d.get("track_id"),
+                      "Bounding box":d.get("box_xyxy")} for d in detections[:80]],
+                    hide_index=True,use_container_width=True
+                )
+            else:
+                st.caption("No vehicles detected in sampled frames, or the detector could not run.")
+            st.caption(f"{len(tracks)} provisional track IDs. Sparse IoU associations "
+                       "are not verified vehicle identities and are NOT BoT-SORT.")
+            plates = a.get("plate_recognition") or {}
+            st.markdown("#### Arabic license-plate OCR candidates (Egypt format requires review)")
+            st.caption(f"Detected plate regions: {plates.get('plates_detected',0)} · "
+                       "No OCR reading is automatically confirmed.")
+            if plates.get("candidates"):
+                st.dataframe(plates["candidates"],hide_index=True,use_container_width=True)
+            else:
+                st.caption("No readable plate candidates at these distances or lighting conditions.")
         with inspector:
             st.markdown("#### AI processing stages")
             stage_status(st,"Vehicle tracking",a.get("object_tracking"))
@@ -522,7 +547,9 @@ elif area=="System health":
         with st.container(border=True):
             st.markdown(f"**{title}**")
             st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
-    st.warning("A configured API does not guarantee requests will succeed. Free endpoints may be rate-limited, discontinued, or unable to analyze a specific incident.")
+    st.warning("Configured means enabled, not validated. The CPU ONNX detectors download "
+               "public weights on first analysis and may run slowly on free Cloud. "
+               "OCR is tentative. OpenRouter and Groq still require valid secrets.")
     st.info("This no-password demo shows only the current browser session's cases, but "
             "files still live in temporary shared server storage. They are not encrypted "
             "or permanently preserved. Anyone with the URL can consume the limited AI "

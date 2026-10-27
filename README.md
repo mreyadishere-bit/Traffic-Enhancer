@@ -1,3 +1,5 @@
+[**CPU YOLO + Egyptian plate OCR for Streamlit**](docs/CLOUD_CPU_VISION.md) · Model download and performance limits described there.
+
 [**Deploy online to Streamlit Community Cloud — automatic GitHub updates**](docs/STREAMLIT_DEPLOY.md) · [Streamlit app entrypoint](streamlit_app.py)
 
 [**Open Traffic Enhancer from GitHub — no CMD**](https://codespaces.new/mreyadishere-bit/Traffic-Enhancer?quickstart=1) · [**How to add GitHub Codespaces API secrets**](docs/GITHUB_ONLY_SETUP.md) · [Windows setup](docs/QUICK_START_GITHUB.md)

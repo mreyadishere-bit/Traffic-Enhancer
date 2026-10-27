@@ -46,9 +46,12 @@ Windows, GitHub Codespaces, Render, Blitz or a manually running FastAPI port.
 
 - Preserves the existing FastAPI workflow and PDF export, and shows actual
   model state/error messages instead of fake analysis results.
-- Uses remote Qwen2.5-VL vision and optional remote Whisper via configured keys.
-  **YOLO and Egyptian plate OCR are deliberately disabled in this free cloud
-  entrypoint.** To run those, you need a sufficiently sized separate worker.
+- Uses remote Qwen2.5-VL and optional Groq Whisper when secrets are valid.
+- CPU-only **YOLOv8n vehicle detection** and a **generic pretrained YOLO26n ONNX plate detector (Egypt unvalidated)**
+  now run in Streamlit via `onnxruntime`. Detected plate crops are read
+  tentatively by Arabic + English Tesseract; uncertainty is explicitly shown.
+  First use downloads public ONNX weights; accuracy and free-cloud reliability
+  are not independently verified. See [CPU AI details](CLOUD_CPU_VISION.md).
 - Streamlit Community Cloud memory/CPU are limited and resources aren't a
   permanent file/database vault. The app can go to sleep or restart at any
   time, wiping local SQLite/video files. **Do not upload sensitive third-party

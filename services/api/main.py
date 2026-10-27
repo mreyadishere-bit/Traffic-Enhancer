@@ -265,16 +265,22 @@ def capabilities():
                  "mode": "operator_configured_remote" if remote else "local",
                  "model": os.getenv("TE_QWEN_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct") if enabled else None,
                  "loaded_and_validated": False},
-        "vehicle_tracking": {"configured": bool(os.getenv("TE_YOLO_MODEL", "").strip()),
-                             "model_tested": False},
+        "vehicle_tracking": {
+            "configured": bool(os.getenv("TE_YOLO_MODEL", "").strip()) or
+                          os.getenv("TE_CLOUD_VISION", "0") == "1",
+            "backend": "onnx_cpu_sampled" if os.getenv("TE_CLOUD_VISION") == "1" else "ultralytics",
+            "model_tested": False},
         "speech": {
             "configured": bool(os.getenv("TE_ASR_MODEL", "").strip()) or
                  (bool(os.getenv("TE_GROQ_ASR_MODEL", "").strip()) and
                   bool(os.getenv("TE_GROQ_API_KEY", "").strip())),
             "mode": "groq" if os.getenv("TE_GROQ_ASR_MODEL") else "local",
             "model_tested": False},
-        "plate_ocr": {"configured": bool(os.getenv("TE_PLATE_MODEL", "").strip()),
-                      "model_tested": False},
+        "plate_ocr": {
+            "configured": bool(os.getenv("TE_PLATE_MODEL", "").strip()) or
+                          os.getenv("TE_CLOUD_VISION", "0") == "1",
+            "backend": "egyptian_onnx_tesseract" if os.getenv("TE_CLOUD_VISION") == "1" else "ultralytics_easyocr",
+            "model_tested": False},
         "traffic_violation_verification": {"available": False,
                                            "human_review_required": True},
         "dashcam_direct_sync": {"available": False, "requires_hardware_test": True}

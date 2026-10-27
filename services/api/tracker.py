@@ -18,6 +18,10 @@ def loaded_vehicle_model(weights: str):
 
 
 def track_vehicles(video, video_metadata: dict) -> dict:
+    # Cloud CPU uses ONNX. Existing local Ultralytics / BoT-SORT remains intact.
+    if os.getenv("TE_CLOUD_VISION", "0") == "1":
+        from .cloud_vision import sample_vehicle_detection
+        return sample_vehicle_detection(video, video_metadata)
     weights = os.getenv("TE_YOLO_MODEL", "").strip()
     if not weights:
         return {"status": "not_configured", "model": None, "tracks": [],
