@@ -20,6 +20,17 @@ def prepare(tmp_path, monkeypatch):
     backend.initialize()
     return backend
 
+def test_reset_stuck_uploader_replaces_widget_key(tmp_path, monkeypatch):
+    prepare(tmp_path, monkeypatch)
+    app=AppTest.from_file(APP,default_timeout=30).run()
+    assert not app.exception, [str(x.message) for x in app.exception]
+    assert app.button(key="retry_stuck_upload")
+    app.button(key="retry_stuck_upload").click().run()
+    assert not app.exception, [str(x.message) for x in app.exception]
+    assert app.session_state["upload_widget_generation"]==1
+    assert any("Optional clip trimming" in str(x.value) for x in app.markdown)
+
+
 def test_opens_without_operator_password(tmp_path, monkeypatch):
     prepare(tmp_path, monkeypatch)
     app = AppTest.from_file(APP, default_timeout=30).run()

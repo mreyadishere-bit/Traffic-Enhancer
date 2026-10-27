@@ -56,9 +56,17 @@ Windows, GitHub Codespaces, Render, Blitz or a manually running FastAPI port.
   permanent file/database vault. The app can go to sleep or restart at any
   time, wiping local SQLite/video files. **Do not upload sensitive third-party
   footage or rely on this deployment for evidence preservation.**
-- Video uploads are capped at 70 MB by the app. The uploader first transfers
-  the source and FFprobe reads its duration; only then do the optional trim
-  controls appear. The upload may take time on slow connections.
+- Video uploads are capped at 70 MB. Native Streamlit first transfers the source
+  to its server-side memory. On successful receipt, the app stages it to a private
+  temporary file using 1 MiB chunks; FFprobe then reads duration, after which
+  the optional trim controls appear. The original path is reused for preview and
+  background submission to avoid additional full-size Python bytes allocations.
+  If the file thumbnail keeps spinning and the app still says "Choose a video",
+  this means Streamlit has not delivered the file to Python; AI/FFprobe have NOT
+  started. Click **Reset stuck upload / choose a file again**, then reselect the
+  clip. If still stuck, reboot the Streamlit Cloud app and try a small MP4 to
+  isolate a Cloud/network upload issue. Reset does not erase saved incident IDs.
+  The app cannot guarantee a fix for underlying browser/network upload failure.
 - **Optional clip trim:** use the two-handle timeline or exact START/END
   numeric inputs to select any 1–180-second interval; the Streamlit preview
   starts and stops at the chosen timestamps when the browser can play MP4.
