@@ -290,6 +290,7 @@ def pending_work():
         try:
             outcome=render_future.result()
             if outcome.get("status")=="completed":
+                st.session_state.setdefault("recent_full_exports",{})[case_id]=outcome
                 st.session_state.last_result=("render_success",outcome)
             else:
                 st.session_state.last_result=("error",outcome.get("note","Video export failed"))
@@ -342,45 +343,61 @@ def render_case_detail(selected):
     first,inspector=st.columns([1.6,1],gap="large")
     with first:
         st.markdown("### Annotated evidence viewer")
-        st.caption("Bounding boxes are from real sampled source frames, not "
-                   "fictional continuous tracking.")
-        # Recover the annotated media from existing saved YOLO results;
-        # this NEVER calls OpenRouter/Groq or re-runs neural inference.
-        saved_detections=(a.get("vehicle_detection") or {}).get("detections") or []
-        cached_movie=backend.DERIVED/(selected_id+".samples.mp4")
-        if not cached_movie.is_file() and saved_detections:
-            if st.button("Generate boxes from saved detections · no API usage",
-                         key="offline_annotations",use_container_width=True):
-                from services.api.visual_evidence import render_sampled_evidence
-                with st.spinner("Drawing boxes on actual source timestamps…"):
-                    result=render_sampled_evidence(
-                        backend.evidence_path(backend.read_incident(selected_id)),
-                        backend.DERIVED,selected_id,
-                        {"detections": saved_detections,
-                         "tracks": (a.get("object_tracking") or {}).get("tracks",[])},
-                        a.get("plate_recognition") or {})
-                    if result["status"]!="completed":
-                        st.warning(result.get("note","Could not create montage"))
-                    else:
-                        st.rerun()
-        viz=a.get("annotated_evidence") or {}
-        preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
+        st.caption("YOLO runs on real frames throughout the selected clip at 1–3 FPS. "
+                   "The full-duration export preserves the timeline.")
+        full_meta=(a.get("full_length_video") or
+                   st.session_state.get("recent_full_exports",{}).get(selected_id,{}) or {})
+        full_video=backend.DERIVED/(selected_id+".tracked.mp4")
+        full_image=backend.DERIVED/(selected_id+".tracked.jpg")
         preview_movie=backend.DERIVED/(selected_id+".samples.mp4")
+        preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
+        viz=a.get("annotated_evidence") or {}
+        if (selected["status"]=="ready" and not full_video.is_file()
+                and st.session_state.get("auto_full_case")!=selected_id
+                and st.session_state.get("pending_render") is None
+                and st.session_state.get("processing_case_id") is None):
+            st.session_state.auto_full_case=selected_id
+            st.session_state.pending_render_case_id=selected_id
+            st.session_state.pending_render=jobs().submit(
+                prepare_full_video,selected_id,float(selected["duration"]))
+            st.info("Creating a full-duration YOLO overlay automatically from "
+                    "the original video, without any additional external AI API.")
+        if full_video.is_file():
+            st.video(full_video.read_bytes(),format="video/mp4")
+            st.caption(
+                f"FULL SELECTED CLIP · {float(selected['duration']):.2f}s · "
+                f"genuine YOLO detection on {full_meta.get('inference_fps','1–3')} "
+                "sampled frames/sec. Between updates, frames are duplicated "
+                "for a normal video timeline, NOT re-detected."
+            )
+            st.download_button("Download full-length annotated MP4",
+                               data=full_video.read_bytes(),
+                               file_name=f"traffic-full-{selected_id[:10]}.mp4",
+                               mime="video/mp4",key="full_download")
+            if full_image.is_file():
+                with st.expander("First annotated frame"):
+                    st.image(str(full_image),use_container_width=True)
+            cols=st.columns(3)
+            cols[0].metric("Real YOLO frames",full_meta.get("analyzed_frames","—"))
+            cols[1].metric("Inference FPS",full_meta.get("inference_fps","—"))
+            cols[2].metric("Selected duration",f"{selected['duration']:.1f}s")
+            if full_meta.get("counts"):
+                import pandas as pd
+                df=pd.DataFrame(full_meta["counts"])
+                st.line_chart(df.set_index("second")[["vehicles"]],height=175)
+        elif st.session_state.get("pending_render") is not None:
+            st.info("Full-clip inference is running. Progress refreshes automatically.")
+        elif full_meta.get("status")=="failed":
+            st.warning(full_meta.get("note","Full-length overlay unavailable."))
+        else:
+            st.info("Preparing the selected recording's full-duration overlay.")
         if preview_movie.is_file():
-            st.video(preview_movie.read_bytes(),format="video/mp4")
-            st.caption("Sampled-frame review montage: each image is a REAL "
-                       "timestamped YOLO observation held for 1 second. "
-                       "Not continuous full-video tracking; no interpolated boxes.")
-            st.download_button("Download annotated sampled video",
-                               data=preview_movie.read_bytes(),
-                               file_name=f"traffic-samples-{selected_id[:10]}.mp4",
-                               mime="video/mp4",key="annotated_download")
-        elif preview_image.is_file():
+            with st.expander("Legacy five-frame diagnostic clip (not original length)"):
+                st.video(preview_movie.read_bytes(),format="video/mp4")
+                st.caption("This older diagnostic video is not the full-length result.")
+        elif preview_image.is_file() and not full_video.is_file():
             st.image(str(preview_image),use_container_width=True,
-                     caption="Detected boxes on real sampled source frame")
-        elif selected["status"]=="ready":
-            st.info("Annotated preview not generated for this analysis. "
-                    "Press Re-run AI analysis to produce annotated media.")
+                     caption="Existing YOLO sample while full rendering starts")
         if preview_image.is_file() and preview_movie.is_file():
             with st.expander("Annotated still frame · preview and JPG download"):
                 st.image(str(preview_image),
@@ -407,7 +424,7 @@ def render_case_detail(selected):
         if viz.get("note"):
             st.caption(viz["note"])
         from services.api.visual_evidence import provisional_pixel_motion
-        moves=viz.get("motion_metrics") or provisional_pixel_motion(
+        moves=full_meta.get("motion_metrics") or viz.get("motion_metrics") or provisional_pixel_motion(
             (a.get("object_tracking") or {}).get("tracks") or [])
         st.markdown("#### Motion measurements · image-plane only")
         if moves:
