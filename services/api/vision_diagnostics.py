@@ -169,12 +169,16 @@ def test_free_image_inference(key: str, *, post=None) -> dict:
         response.raise_for_status()
         data=response.json()
         chosen=str(data.get("model") or "Unreported by provider")[:110]
-        choices=data.get("choices") or []
-        if not choices:
-            return {"status":"error","message":"Provider returned no completion choices."}
+        from .vision_reply import inspect_chat_reply
+        reply=inspect_chat_reply(data)
+        if reply["status"]!="ok":
+            return {"status":"error", "diagnostic_code":reply["reason"],
+                    "model":chosen,
+                    "message":"OpenRouter responded but returned no usable text ("+
+                               reply["reason"]+"). The model is NOT verified for image inference."}
         return {"status":"success",
                 "model":chosen,
-                "message":"Free image inference accepted. This does not validate the model's road-safety accuracy."}
+                "message":"Free image inference accepted and returned text. This does not validate the model's road-safety accuracy."}
     except httpx.HTTPStatusError as exc:
         code=exc.response.status_code
         descriptions={
