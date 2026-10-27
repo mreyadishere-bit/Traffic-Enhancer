@@ -4,7 +4,7 @@ import httpx
 import pytest
 from services.api import qwen
 from services.api.vision_routing import (
-    no_cost_model,free_qwen_vision_options,request_free_vision,RoutingFailure,
+    no_cost_model,free_qwen_vision_options,free_vision_options,request_free_vision,RoutingFailure,
 )
 
 
@@ -30,6 +30,41 @@ def test_catalog_rejects_paid_or_text_only_qwen():
        "pricing":{"prompt":"0","completion":"0"}},
     ]
     assert free_qwen_vision_options(choices)==["qwen/qwen3.8-27b:free"]
+
+
+def test_free_catalog_rejects_paid_image_and_request_costs():
+    models=[
+        {"id":"vendor/vision:free","architecture":{"input_modalities":["image","text"]},
+         "pricing":{"prompt":"0","completion":"0","image":"0","request":"0"}},
+        {"id":"vendor/paid-image:free","architecture":{"input_modalities":["image"]},
+         "pricing":{"prompt":"0","completion":"0","image":"0.001"}},
+        {"id":"vendor/paid-request:free","architecture":{"input_modalities":["image"]},
+         "pricing":{"prompt":"0","completion":"0","request":"0.01"}},
+        {"id":"vendor/text-only:free","architecture":{"input_modalities":["text"]},
+         "pricing":{"prompt":"0","completion":"0"}},
+    ]
+    assert free_vision_options(models)==["vendor/vision:free"]
+
+
+def test_qwen_404_recovers_via_catalog_verified_non_qwen_free_vision():
+    calls=[]
+    def post(url,**kwargs):
+        model=kwargs["json"]["model"]
+        calls.append(model)
+        return fake_response(404) if len(calls)==1 else fake_response(
+            200,"nvidia/nemotron-3.5-super-vl:free")
+    def get(url,**kwargs):
+        return httpx.Response(200,request=httpx.Request("GET",url),json={"data":[{
+            "id":"nvidia/nemotron-3.5-super-vl:free",
+            "architecture":{"input_modalities":["image","text"]},
+            "pricing":{"prompt":"0","completion":"0","request":"0","image":"0"}}]})
+    resp,selected,tried=request_free_vision(
+        "https://openrouter.ai/api/v1/chat/completions",{},[],
+        "qwen/qwen3.8-27b:free",post=post,get=get)
+    assert selected=="nvidia/nemotron-3.5-super-vl:free"
+    assert tried==calls==["qwen/qwen3.8-27b:free",
+                          "nvidia/nemotron-3.5-super-vl:free"]
+    assert resp.json()["model"]=="nvidia/nemotron-3.5-super-vl:free"
 
 
 def test_qwen_404_then_free_vision_router_with_actual_model():
