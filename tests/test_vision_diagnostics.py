@@ -92,6 +92,47 @@ def test_live_404_offers_account_routing_next_step_without_leak():
     assert "dont print" not in str(result)
 
 
+def test_cpu_probe_executes_both_real_model_interfaces_on_synthetic_image(monkeypatch):
+    from services.api.vision_diagnostics import cpu_detector_readiness
+    import subprocess
+    monkeypatch.setenv("TE_CLOUD_VISION","1")
+    visited=[]
+    def fake_predict(kind,image):
+        visited.append((kind,image.size))
+        return []
+    result=cpu_detector_readiness(
+        predict=fake_predict,which=lambda _: "/usr/bin/tesseract",
+        run=lambda *args,**kwargs: subprocess.CompletedProcess(
+            args[0],0,"List of available languages:\neng\nara\n",""))
+    assert visited == [("vehicle",(320,192)),("plate",(320,192))]
+    assert result["vehicle"]["status"]=="ready"
+    assert result["plate"]["status"]=="ready"
+    assert result["arabic_ocr"]["status"]=="ready"
+
+
+def test_cpu_probe_failure_does_not_leak_private_exception_message(monkeypatch):
+    from services.api.vision_diagnostics import cpu_detector_readiness
+    monkeypatch.setenv("TE_CLOUD_VISION","1")
+    def fake_predict(kind,image):
+        if kind=="vehicle":
+            raise ValueError("token-to-keep-private")
+        return []
+    result=cpu_detector_readiness(predict=fake_predict,which=lambda _: None)
+    assert result["vehicle"]=={"status":"failed","error_type":"ValueError"}
+    assert result["plate"]["status"]=="ready"
+    assert result["arabic_ocr"]["error_type"]=="TesseractNotInstalled"
+    assert "token-to-keep-private" not in str(result)
+
+
+def test_disabled_cpu_probe_does_not_load_models(monkeypatch):
+    from services.api.vision_diagnostics import cpu_detector_readiness
+    monkeypatch.setenv("TE_CLOUD_VISION","0")
+    def forbidden(*args,**kwargs):
+        raise AssertionError("disabled must not invoke any CPU detector")
+    result=cpu_detector_readiness(predict=forbidden,which=forbidden,run=forbidden)
+    assert {v["status"] for v in result.values()}=={"disabled"}
+
+
 def test_no_key_does_not_trigger_network():
     result=check_image("   ",post=lambda *a,**k: (_ for _ in ()).throw(AssertionError()))
     assert result["status"]=="not_configured"

@@ -74,6 +74,66 @@ def catalog_diagnostics(key: str = "", *, get=None) -> dict:
     return result
 
 
+def cpu_detector_readiness(*, predict=None, which=None, run=None) -> dict:
+    """Explicit on-demand CPU inference self-test using only a generated blank image.
+
+    This checks runtime/model-loading, not detector accuracy on Egyptian roads.
+    Never send or load uploaded footage, and do not expose exceptions/secrets.
+    """
+    import os
+    import shutil
+    import subprocess
+    import time
+
+    if os.getenv("TE_CLOUD_VISION", "0") != "1":
+        return {"vehicle": {"status": "disabled"},
+                "plate": {"status": "disabled"},
+                "arabic_ocr": {"status": "disabled"}}
+
+    if predict is None:
+        from .cloud_vision import predict_frame
+        predict = predict_frame
+    if which is None:
+        which = shutil.which
+    if run is None:
+        run = subprocess.run
+
+    # Not a real driving scene: successful execution is only a readiness check.
+    blank = Image.new("RGB", (320, 192), (114, 114, 114))
+    results = {}
+    for kind in ("vehicle", "plate"):
+        started = time.monotonic()
+        try:
+            detections = predict(kind, blank)
+            if not isinstance(detections, list):
+                raise TypeError("Detector did not return a detection list")
+            results[kind] = {"status": "ready",
+                             "elapsed_seconds": round(time.monotonic() - started, 2)}
+        except Exception as exc:
+            results[kind] = {"status": "failed", "error_type": type(exc).__name__}
+
+    if not which("tesseract"):
+        results["arabic_ocr"] = {"status": "failed", "error_type": "TesseractNotInstalled"}
+    else:
+        try:
+            proc = run(["tesseract", "--list-langs"], capture_output=True,
+                       text=True, timeout=8, check=False)
+            if proc.returncode != 0:
+                raise RuntimeError("Tesseract language listing failed")
+            languages = set((proc.stdout + "\n" + proc.stderr).splitlines())
+            if "ara" in languages and "eng" in languages:
+                results["arabic_ocr"] = {"status": "ready", "languages": ["ara", "eng"]}
+            elif "ara" in languages:
+                results["arabic_ocr"] = {"status": "partial", "languages": ["ara"]}
+            else:
+                results["arabic_ocr"] = {"status": "failed",
+                                         "error_type": "ArabicLanguageDataMissing"}
+        except Exception as exc:
+            results["arabic_ocr"] = {"status": "failed",
+                                     "error_type": type(exc).__name__}
+    return results
+
+
 def _synthetic_png() -> str:
     """Tiny non-sensitive synthetic probe, never sourced from uploaded footage."""
     image=Image.new("RGB",(40,40),(250,250,250))

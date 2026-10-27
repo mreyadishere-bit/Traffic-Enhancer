@@ -860,7 +860,40 @@ elif area=="System health":
         cap=caps.get(key,{})
         with st.container(border=True):
             st.markdown(f"**{title}**")
-            st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
+            st.caption("Enabled — runtime unverified" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
+    st.markdown("#### Local CPU models · actual readiness check")
+    st.caption("Optional: load both real ONNX detectors and run them on a generated "
+               "blank image, then inspect installed Tesseract languages. First check "
+               "may download public weights and take time on free Cloud. No road "
+               "footage is used or transmitted; success does NOT measure accuracy.")
+    if st.button("Test CPU YOLO, plate detector and Arabic OCR installation",
+                 use_container_width=True, key="run_cpu_readiness"):
+        from services.api.vision_diagnostics import cpu_detector_readiness
+        with st.spinner("Loading CPU ONNX models and checking OCR languages…"):
+            st.session_state.cpu_readiness=cpu_detector_readiness()
+    cpu=st.session_state.get("cpu_readiness")
+    if cpu:
+        for name, title in (
+            ("vehicle", "Vehicle YOLO ONNX"),
+            ("plate", "Generic license plate ONNX (Egypt unvalidated)"),
+            ("arabic_ocr", "Tesseract Arabic + English")):
+            item=cpu.get(name,{})
+            status=item.get("status","failed")
+            label=f"{title}: "
+            if status=="ready":
+                elapsed=item.get("elapsed_seconds")
+                timing=f" ({elapsed:.2f}s on synthetic image)" if isinstance(elapsed,(float,int)) else ""
+                st.success(label+"runtime executed successfully"+timing)
+            elif status=="partial":
+                st.warning(label+"only partial language support available")
+            elif status=="disabled":
+                st.info(label+"disabled by TE_CLOUD_VISION configuration")
+            else:
+                st.error(label+"runtime check failed ("+
+                         str(item.get("error_type","unknown error"))+")")
+        st.caption("These checks verify loading/execution ONLY. They do not establish "
+                   "detection accuracy, Egyptian plate readability, or vehicle speed.")
+    st.caption("Health diagnostics UI revision: CPU-check-2026-10-27")
     st.markdown("#### OpenRouter · free image AI diagnostics")
     st.caption("The public catalog, account-filtered catalog, and live inference "
                "are three DIFFERENT checks. No road footage is sent here.")
