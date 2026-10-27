@@ -528,7 +528,16 @@ def render_case_detail(selected):
             st.caption("404 can mean an unavailable model or an account/provider "
                        "routing restriction. The no-cost fallback is automatic on "
                        "new requests; old failures need visual-only retry.")
-        stage_status(st,"Egyptian plate OCR",a.get("plate_recognition"))
+        plates_stage=a.get("plate_recognition") or {}
+        if plates_stage.get("status")=="completed":
+            if plates_stage.get("candidates"):
+                st.warning("Plate detector ran; OCR candidates need human verification. "
+                           "No registration number is confirmed.")
+            else:
+                st.info("Plate detection completed, but no reliable Egyptian plate "
+                        "characters were recovered. Do not assume a readable plate.")
+        else:
+            stage_status(st,"Plate detection and tentative Arabic OCR",plates_stage)
         stage_status(st,"Potential violation review",a.get("violation_assessment"))
         if selected["status"]=="ready":
             if st.button("Retry visual AI only · keep YOLO and full video",
