@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 import tempfile
 from functools import lru_cache
@@ -289,12 +290,15 @@ def sample_egyptian_plates(video: Path, duration: float) -> dict:
     try:
         count = min(8,max(2,int(os.getenv("TE_CLOUD_PLATE_FRAMES","5"))))
         candidates=[]
+        regions=[]
         detected=0
         processed=0
         for second,image in sampled_frames(video,float(duration),count):
             processed+=1
             for item in predict_frame("plate",image)[:5]:
                 detected+=1
+                regions.append({"second":second,"bbox":item["box_xyxy"],
+                                "confidence":item["confidence"]})
                 x1,y1,x2,y2=[int(v) for v in item["box_xyxy"]]
                 if x2<=x1 or y2<=y1:
                     continue
@@ -303,7 +307,14 @@ def sample_egyptian_plates(video: Path, duration: float) -> dict:
                 if crop.width < 16 or crop.height < 9:
                     continue
                 text,conf=_ocr_plate(crop)
-                if not text or conf < .15:
+                # Discard random Latin fragments (e.g. "YS", "ss") and symbols.
+                # Egyptian plates generally contain Arabic letters AND digits,
+                # but this is only a cautious filter, not authoritative validation.
+                normalized=str(text).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
+                                                            "01234567890123456789"))
+                letters=re.findall(r"[\u0621-\u064a]",normalized)
+                numbers=re.findall(r"[0-9]",normalized)
+                if conf < .35 or len(letters)<2 or len(numbers)<3:
                     continue
                 candidates.append({
                     "raw_text":text,
@@ -317,6 +328,7 @@ def sample_egyptian_plates(video: Path, duration: float) -> dict:
         return {"status":"completed","model":"YOLO26n plate ONNX + Tesseract Arabic/English",
                 "value":None,"candidates":candidates[:18],
                 "plates_detected":detected,
+                "regions":regions[:40],
                 "sampled_frames":processed,
                 "note":"Real pretrained plate detection (not Egypt-specific); OCR readings are uncertain, not "
                        "verified. No text is inferred when pixels are too small or blurry. "

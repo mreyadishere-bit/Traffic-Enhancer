@@ -59,7 +59,7 @@ os.environ.pop("TE_ASR_MODEL", None)
 if os.environ.get("TE_QWEN_API_KEY"):
     os.environ.setdefault("TE_ENABLE_QWEN", "1")
     os.environ.setdefault("TE_QWEN_API_BASE", "https://openrouter.ai/api/v1")
-    os.environ.setdefault("TE_QWEN_MODEL", "qwen/qwen-2.5-vl-7b-instruct:free")
+    os.environ.setdefault("TE_QWEN_MODEL", "qwen/qwen3.8-27b:free")
     os.environ.setdefault("TE_QWEN_FRAMES", "2")
 if os.environ.get("TE_GROQ_API_KEY"):
     os.environ.setdefault("TE_GROQ_ASR_MODEL", "whisper-large-v3-turbo")
@@ -473,6 +473,49 @@ elif area in ("Evidence studio","Incident library"):
             if thumb.is_file():
                 st.markdown("**Original unannotated evidence frame**")
                 st.image(str(thumb),caption="Actual source frame — not proof of a violation.",use_container_width=True)
+            st.markdown("#### Annotated evidence viewer")
+            viz=a.get("annotated_evidence") or {}
+            preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
+            preview_movie=backend.DERIVED/(selected_id+".samples.mp4")
+            if preview_movie.is_file() and viz.get("status")=="completed":
+                st.video(preview_movie.read_bytes(),format="video/mp4")
+                st.caption("Sampled-frame review montage: each image is a REAL "
+                           "timestamped YOLO observation held for 1 second. "
+                           "Not continuous full-video tracking; no interpolated boxes.")
+                st.download_button("Download annotated sampled video",
+                                   data=preview_movie.read_bytes(),
+                                   file_name=f"traffic-samples-{selected_id[:10]}.mp4",
+                                   mime="video/mp4",key="annotated_download")
+            elif preview_image.is_file():
+                st.image(str(preview_image),use_container_width=True,
+                         caption="Detected boxes on real sampled source frame")
+            elif selected["status"]=="ready":
+                st.info("Annotated preview not generated for this analysis. "
+                        "Press Re-run AI analysis to produce annotated media.")
+            if viz.get("note"):
+                st.caption(viz["note"])
+            moves=viz.get("motion_metrics") or []
+            st.markdown("#### Motion measurements · image-plane only")
+            if moves:
+                st.dataframe(
+                    [{"Track (provisional)":m["track_id"],"Vehicle":m["vehicle"],
+                      "Samples":m["observations"],
+                      "Path (pixels)":m["image_path_px"],
+                      "Motion (px/s)":m["image_motion_px_s"],
+                      "Speed (km/h)":"N/A — uncalibrated",
+                      "Ground distance":"N/A — uncalibrated"}
+                     for m in moves],hide_index=True,use_container_width=True)
+                from services.api.visual_evidence import motion_csv
+                st.download_button("Download measured pixel-motion CSV",
+                                   data=motion_csv(moves),
+                                   file_name=f"motion-{selected_id[:10]}.csv",
+                                   mime="text/csv",key="motion_download")
+            else:
+                st.caption("At least two detections matched to the same provisional "
+                           "track are required for pixel-motion measurements.")
+            st.info("Real-world speed and distance require a calibrated stationary "
+                    "camera, known ground-plane geometry and reliable track IDs. "
+                    "Uncalibrated px/s is NOT km/h; do not use it as evidence of speeding.")
             st.markdown("#### Relevant model observations")
             observation=(a.get("visual_reasoning") or {}).get("observations") or {}
             st.write(observation.get("scene_summary") or "No visual scene interpretation is available.")
@@ -508,7 +551,7 @@ elif area in ("Evidence studio","Incident library"):
             st.markdown("#### AI processing stages")
             stage_status(st,"Vehicle tracking",a.get("object_tracking"))
             stage_status(st,"Driver speech",a.get("transcription"))
-            stage_status(st,"Qwen2.5-VL",a.get("visual_reasoning"))
+            stage_status(st,"Qwen vision reasoning",a.get("visual_reasoning"))
             stage_status(st,"Egyptian plate OCR",a.get("plate_recognition"))
             stage_status(st,"Potential violation review",a.get("violation_assessment"))
             if selected["status"] in ("ready","failed"):

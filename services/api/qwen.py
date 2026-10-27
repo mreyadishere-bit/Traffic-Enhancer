@@ -78,8 +78,19 @@ def describe_video(original: Path, duration: float, claim: dict) -> dict:
         try:
             return _describe_via_remote(original, duration, claim, model_id, remote_base)
         except Exception as exc:
-            return {"status": "failed", "model": model_id, "backend": "operator_configured_remote",
-                    "observations": None, "note": f"{type(exc).__name__}: {str(exc)[:250]}"}
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code == 404:
+                note = ("OpenRouter HTTP 404: the selected model/endpoint is unavailable. "
+                        "Try qwen/qwen3.8-27b:free in Streamlit Secrets, then reboot.")
+            elif code == 401:
+                note = "OpenRouter HTTP 401: check TE_QWEN_API_KEY in Streamlit Secrets."
+            elif code == 429:
+                note = "OpenRouter HTTP 429: free inference rate limit reached."
+            else:
+                note = f"{type(exc).__name__}: model request failed (do not treat it as a violation)."
+            return {"status":"failed","model":model_id,
+                    "backend":"operator_configured_remote",
+                    "observations":None,"note":note}
     try:
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -174,8 +185,13 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
             content.append({"type": "text", "text": f"Source frame at {at} seconds"})
             content.append({"type": "image_url", "image_url": {
                 "url": "data:image/jpeg;base64," + base64.b64encode(frame.read_bytes()).decode("ascii")}})
+        # The former Qwen2.5 free slug was retired. Retry a currently listed
+        # free multimodal Qwen model only when OpenRouter rejects the old slug.
+        legacy_slugs = {"qwen/qwen-2.5-vl-7b-instruct:free"}
+        fallback_slug = "qwen/qwen3.8-27b:free"
+        endpoint = api_base.rstrip("/") + "/chat/completions"
         response = httpx.post(
-            api_base.rstrip("/") + "/chat/completions",
+            endpoint,
             headers={
                 "Authorization": "Bearer " + os.getenv("TE_QWEN_API_KEY", "local-development"),
                 "Content-Type": "application/json"
@@ -185,6 +201,21 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
                   "max_tokens": 450, "temperature": 0},
             timeout=httpx.Timeout(240, connect=10)
         )
+        actual_model = model_id
+        if (response.status_code == 404 and model_id in legacy_slugs
+                and api_base.rstrip("/") == "https://openrouter.ai/api/v1"):
+            response = httpx.post(
+                endpoint,
+                headers={
+                    "Authorization": "Bearer " + os.getenv("TE_QWEN_API_KEY",""),
+                    "Content-Type": "application/json",
+                },
+                json={"model": fallback_slug,
+                      "messages":[{"role":"user","content":content}],
+                      "max_tokens":450,"temperature":0},
+                timeout=httpx.Timeout(240,connect=10),
+            )
+            actual_model = fallback_slug
         response.raise_for_status()
         result = response.json()
         raw = result["choices"][0]["message"]["content"]
@@ -192,11 +223,11 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
             raise ValueError("Expected Qwen text response from compatible API")
         parsed = parse_json_response(raw)
         if parsed is None:
-            return {"status": "unparseable", "model": model_id,
+            return {"status": "unparseable", "model": actual_model,
                     "backend": "operator_configured_remote",
                     "observations": None,
                     "note": "Remote model response was not valid expected JSON."}
-        return {"status": "completed", "model": model_id,
+        return {"status": "completed", "model": actual_model,
                 "backend": "operator_configured_remote",
                 "observations": parsed, "sampled_seconds": [s for s, _ in frames],
                 "note": "AI-generated candidate observations only, not proven offenses."}
