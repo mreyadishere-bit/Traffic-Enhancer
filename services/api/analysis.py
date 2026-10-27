@@ -132,8 +132,6 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
     claim = parse_driver_claim(speech.get("text"))
     progress('tracking_vehicles')
     tracking = track_vehicles(original, metadata)
-    progress('qwen_visual_reasoning')
-    qwen = describe_video(original, duration, claim)
     progress('reading_plates')
     plates = scan_plates(original, duration)
     progress('rendering_annotated_evidence')
@@ -146,6 +144,11 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
         original, preview.parent, preview.stem, duration,
         progress=progress) if __import__("os").getenv("TE_CLOUD_VISION","0") == "1"
         else {"status":"not_configured"})
+    # Never hold the annotated evidence export hostage to optional remote VLM.
+    # Qwen/OpenRouter may be unavailable, blocked, or rate-limited; CPU evidence
+    # and tentative OCR should still be produced first.
+    progress('qwen_visual_reasoning')
+    qwen = describe_video(original, duration, claim)
     progress('reconciling_evidence')
     target = match_target(claim, tracking)
     assessment = assess_potential_events(claim, qwen)
