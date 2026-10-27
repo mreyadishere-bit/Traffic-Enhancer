@@ -8,6 +8,7 @@ on:
       - "tests/test_streamlit_cloud.py"
       - "tests/test_upload_intake.py"
       - "tests/test_vision_reply.py"
+      - "tests/test_pdf_truthfulness.py"
       - "tests/test_vision_pipeline_order.py"
       - "tests/test_vision_routing.py"
       - ".streamlit/**"
