@@ -860,7 +860,7 @@ elif area=="System health":
         cap=caps.get(key,{})
         with st.container(border=True):
             st.markdown(f"**{title}**")
-            st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
+            st.caption("Enabled — runtime unverified" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
     st.markdown("#### Local CPU models · actual readiness check")
     st.caption("Optional: load both real ONNX detectors and run them on a generated "
                "blank image, then inspect installed Tesseract languages. First check "
