@@ -78,14 +78,26 @@ def describe_video(original: Path, duration: float, claim: dict) -> dict:
         try:
             return _describe_via_remote(original, duration, claim, model_id, remote_base)
         except Exception as exc:
-            code = getattr(getattr(exc, "response", None), "status_code", None)
-            if code == 404:
-                note = ("OpenRouter HTTP 404: the selected model/endpoint is unavailable. "
-                        "Try qwen/qwen3.8-27b:free in Streamlit Secrets, then reboot.")
+            from .vision_routing import RoutingFailure
+            code = (exc.status_code if isinstance(exc,RoutingFailure) else
+                    getattr(getattr(exc, "response", None), "status_code", None))
+            if isinstance(exc, RoutingFailure):
+                note = ("OpenRouter HTTP 404: no available endpoint accepted these free "
+                        "image requests. Tried: " + ", ".join(exc.tried)[:160] +
+                        ". Check model/provider restrictions in OpenRouter and try again later.")
+            elif code == 404:
+                note = ("OpenRouter HTTP 404: model or provider endpoint unavailable. "
+                        "Check account privacy/provider restrictions.")
             elif code == 401:
                 note = "OpenRouter HTTP 401: check TE_QWEN_API_KEY in Streamlit Secrets."
             elif code == 429:
                 note = "OpenRouter HTTP 429: free inference rate limit reached."
+            elif code in (402,403):
+                note = f"OpenRouter HTTP {code}: this API key cannot use available providers."
+            elif isinstance(exc,ValueError) and "non-free" in str(exc):
+                note = ("Configured OpenRouter model is not a free variant. "
+                        "Use qwen/qwen3.8-27b:free or openrouter/free, "
+                        "then retry in the app.")
             elif isinstance(exc, ValueError) and "HTTPS" in str(exc):
                 note = "Remote AI API must use HTTPS or a loopback HTTP endpoint."
             else:
@@ -187,40 +199,26 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
             content.append({"type": "text", "text": f"Source frame at {at} seconds"})
             content.append({"type": "image_url", "image_url": {
                 "url": "data:image/jpeg;base64," + base64.b64encode(frame.read_bytes()).decode("ascii")}})
-        # The former Qwen2.5 free slug was retired. Retry a currently listed
-        # free multimodal Qwen model only when OpenRouter rejects the old slug.
-        legacy_slugs = {"qwen/qwen-2.5-vl-7b-instruct:free"}
-        fallback_slug = "qwen/qwen3.8-27b:free"
+        # Only official OpenRouter gets the no-cost fallback chain.
+        # Other operator-configured compatible hosts keep their own model IDs.
         endpoint = api_base.rstrip("/") + "/chat/completions"
-        response = httpx.post(
-            endpoint,
-            headers={
-                "Authorization": "Bearer " + os.getenv("TE_QWEN_API_KEY", "local-development"),
-                "Content-Type": "application/json"
-            },
-            json={"model": model_id,
-                  "messages": [{"role": "user", "content": content}],
-                  "max_tokens": 450, "temperature": 0},
-            timeout=httpx.Timeout(240, connect=10)
-        )
-        actual_model = model_id
-        if (getattr(response, "status_code", None) == 404
-                and model_id != fallback_slug
-                and model_id.lower().startswith(("qwen/", "qwen-"))
-                and api_base.rstrip("/") == "https://openrouter.ai/api/v1"):
+        headers = {
+            "Authorization": "Bearer " + os.getenv("TE_QWEN_API_KEY", ""),
+            "Content-Type": "application/json",
+        }
+        if api_base.rstrip("/") == "https://openrouter.ai/api/v1":
+            from .vision_routing import request_free_vision
+            response, actual_model, tried = request_free_vision(
+                endpoint,headers,content,model_id)
+        else:
             response = httpx.post(
-                endpoint,
-                headers={
-                    "Authorization": "Bearer " + os.getenv("TE_QWEN_API_KEY",""),
-                    "Content-Type": "application/json",
-                },
-                json={"model": fallback_slug,
-                      "messages":[{"role":"user","content":content}],
+                endpoint,headers=headers,
+                json={"model":model_id,"messages":[{"role":"user","content":content}],
                       "max_tokens":450,"temperature":0},
-                timeout=httpx.Timeout(240,connect=10),
-            )
-            actual_model = fallback_slug
-        response.raise_for_status()
+                timeout=httpx.Timeout(180,connect=10))
+            response.raise_for_status()
+            actual_model = model_id
+            tried = [model_id]
         result = response.json()
         raw = result["choices"][0]["message"]["content"]
         if not isinstance(raw, str):
@@ -231,7 +229,13 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
                     "backend": "operator_configured_remote",
                     "observations": None,
                     "note": "Remote model response was not valid expected JSON."}
-        return {"status": "completed", "model": actual_model,
+        actual_served = result.get("model") or actual_model
+        return {"status": "completed", "model": actual_served,
+                "requested_model": model_id,
+                "routing": "OpenRouter free multimodal router" if
+                           actual_model == "openrouter/free" else "requested/free Qwen",
+                "attempted_models": tried,
                 "backend": "operator_configured_remote",
                 "observations": parsed, "sampled_seconds": [s for s, _ in frames],
-                "note": "AI-generated candidate observations only, not proven offenses."}
+                "note": ("AI-generated scene candidates only, NOT verified offenses. "
+                         "Actual inference model: " + str(actual_served)[:100])}
