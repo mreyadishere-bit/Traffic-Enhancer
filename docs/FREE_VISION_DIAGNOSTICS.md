@@ -24,6 +24,14 @@ Official documentation:
 - https://openrouter.ai/docs/api/api-reference/models/list-models-filtered-by-user-provider-preferences-privacy-settings-and-guardrails
 - https://openrouter.ai/openrouter/free
 
+System Health also includes an optional **CPU YOLO + plate locator + Arabic
+Tesseract runtime self-test**. It uses only a generated blank image. It invokes
+the actual ONNX runtime and may download public detector weights on first use.
+"Ready" means the model loaded and executed, **not** that it detects vehicles,
+reads Egyptian registrations or measures speed accurately on road footage.
+Failures expose exception types only (not secret values or upload content).
+The health page shows a fixed UI revision label to help detect stale deployments.
+
 For existing cases whose visual stage failed, open Evidence Studio and click
 Retry visual AI only. This reuses the previously uploaded clip if it still
 exists, preserving YOLO and annotated video. A failed public catalog is not
