@@ -16,7 +16,8 @@ import tempfile
 from pathlib import Path
 from PIL import Image
 
-from .visual_evidence import annotate_frame, _iou, provisional_pixel_motion
+from .visual_evidence import annotate_frame, provisional_pixel_motion
+from .cloud_vision import _iou
 
 
 def review_fps(seconds: float) -> int:
