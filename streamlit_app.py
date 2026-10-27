@@ -304,15 +304,20 @@ def pending_work():
             st.info(f"Building a full-duration video from actual YOLO detections: {step}")
             return
         st.session_state.pending_render=None
+        st.session_state.pending_render_case_id=None
         try:
             outcome=render_future.result()
+            st.session_state.setdefault("recent_full_exports",{})[case_id]=outcome
             if outcome.get("status")=="completed":
-                st.session_state.setdefault("recent_full_exports",{})[case_id]=outcome
                 st.session_state.last_result=("render_success",outcome)
             else:
-                st.session_state.last_result=("error",outcome.get("note","Video export failed"))
+                st.session_state.last_result=("error",
+                    outcome.get("note","Full-length video export failed"))
         except Exception as exc:
-            st.session_state.last_result=("error",f"Full clip failed: {type(exc).__name__}")
+            safe_note=f"Render worker failed ({type(exc).__name__})."
+            st.session_state.setdefault("recent_full_exports",{})[case_id]={
+                "status":"failed","note":safe_note}
+            st.session_state.last_result=("error",safe_note)
         st.rerun()
 
 
@@ -367,24 +372,65 @@ def render_case_detail(selected):
         st.markdown("### Annotated evidence viewer")
         st.caption("YOLO runs on real frames throughout the selected clip at 1–3 FPS. "
                    "The full-duration export preserves the timeline.")
-        full_meta=(a.get("full_length_video") or
-                   st.session_state.get("recent_full_exports",{}).get(selected_id,{}) or {})
+        # Ephemeral Cloud restarts can remove derived MP4 after a saved
+        # analysis still reports 'completed'. Use disk reality, not stale DB.
+        from services.api.overlay_state import overlay_state
+        session_exports=st.session_state.setdefault("recent_full_exports",{})
+        full_meta=(session_exports.get(selected_id) or a.get("full_length_video") or {})
         full_video=backend.DERIVED/(selected_id+".tracked.mp4")
         full_image=backend.DERIVED/(selected_id+".tracked.jpg")
         preview_movie=backend.DERIVED/(selected_id+".samples.mp4")
         preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
         viz=a.get("annotated_evidence") or {}
-        if (selected["status"]=="ready" and not full_video.is_file()
-                and st.session_state.get("auto_full_case")!=selected_id
-                and st.session_state.get("pending_render") is None
-                and st.session_state.get("processing_case_id") is None):
-            st.session_state.auto_full_case=selected_id
+        try:
+            original_path=backend.evidence_path(backend.read_incident(selected_id))
+            original_exists=original_path.is_file()
+        except Exception:
+            original_exists=False
+        attempts=st.session_state.setdefault("overlay_attempted_ids",set())
+        pending_id=st.session_state.get("pending_render_case_id")
+        pending_future=st.session_state.get("pending_render")
+        job_active=(pending_id==selected_id and pending_future is not None)
+        status=overlay_state(ready=selected["status"]=="ready",
+                             video_exists=full_video.is_file(),
+                             source_exists=original_exists,job_active=job_active,
+                             attempted=selected_id in attempts,
+                             last_status=(session_exports.get(selected_id) or {}).get("status"))
+        if status=="auto_rebuild" and st.session_state.get("processing_case_id") is None:
+            attempts.add(selected_id)
             st.session_state.pending_render_case_id=selected_id
             st.session_state.pending_render=jobs().submit(
                 prepare_full_video,selected_id,float(selected["duration"]))
-            st.info("Creating a full-duration YOLO overlay automatically from "
-                    "the original video, without any additional external AI API.")
-        if full_video.is_file():
+            status="rendering"
+        if status=="source_missing":
+            st.error("The original selected video is missing from this temporary "
+                     "Cloud instance. The report metadata survived, but the MP4 "
+                     "cannot be regenerated. Upload the source video again.")
+        elif status=="rendering":
+            with render_progress()["lock"]:
+                current_step=render_progress()["cases"].get(selected_id,"starting CPU inference")
+            st.info("Full-duration overlay is processing automatically: " +
+                    str(current_step).replace("_"," ")[:100])
+        elif status in ("failed","needs_retry"):
+            note=session_exports.get(selected_id,{}).get("note")
+            if status=="failed":
+                st.error("Full-length video regeneration failed. " +
+                         str(note or "The free CPU worker could not finish.")[:220])
+            else:
+                st.warning("The MP4 is not present on this server. The previous "
+                           "render attempt has ended; no rendering job is running.")
+            if st.button("Retry full-length overlay · keep saved analysis",
+                         key="retry_overlay_"+selected_id[:10],use_container_width=True,
+                         disabled=(st.session_state.get("pending_render") is not None)):
+                session_exports.pop(selected_id,None)
+                attempts.add(selected_id)
+                st.session_state.pending_render_case_id=selected_id
+                st.session_state.pending_render=jobs().submit(
+                    prepare_full_video,selected_id,float(selected["duration"]))
+                st.rerun()
+        elif status=="case_not_ready":
+            st.info("The case is not ready. Live stage updates appear above.")
+        if status=="available":
             st.video(full_video.read_bytes(),format="video/mp4")
             st.caption(
                 f"FULL SELECTED CLIP · {float(selected['duration']):.2f}s · "
@@ -407,12 +453,6 @@ def render_case_detail(selected):
                 import pandas as pd
                 df=pd.DataFrame(full_meta["counts"])
                 st.line_chart(df.set_index("second")[["vehicles"]],height=175)
-        elif st.session_state.get("pending_render") is not None:
-            st.info("Full-clip inference is running. Progress refreshes automatically.")
-        elif full_meta.get("status")=="failed":
-            st.warning(full_meta.get("note","Full-length overlay unavailable."))
-        else:
-            st.info("Preparing the selected recording's full-duration overlay.")
         if preview_movie.is_file():
             with st.expander("Legacy five-frame diagnostic clip (not original length)"):
                 st.video(preview_movie.read_bytes(),format="video/mp4")
