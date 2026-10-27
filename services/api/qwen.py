@@ -204,7 +204,9 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
             timeout=httpx.Timeout(240, connect=10)
         )
         actual_model = model_id
-        if (getattr(response, "status_code", None) == 404 and model_id in legacy_slugs
+        if (getattr(response, "status_code", None) == 404
+                and model_id != fallback_slug
+                and model_id.lower().startswith(("qwen/", "qwen-"))
                 and api_base.rstrip("/") == "https://openrouter.ai/api/v1"):
             response = httpx.post(
                 endpoint,
