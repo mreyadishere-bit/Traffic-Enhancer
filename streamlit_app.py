@@ -233,7 +233,14 @@ def pending_work():
     future=st.session_state.get("pending_work")
     if future is not None:
         if not future.done():
-            st.info("Uploading and trimming the selected source video…")
+            kind=st.session_state.get("pending_kind")
+            if kind=="vision_only":
+                st.info("Checking current free visual model endpoints and analyzing "
+                        "the saved video frames. YOLO and video export are preserved.")
+            elif kind=="rerun":
+                st.info("Re-running the case analysis…")
+            else:
+                st.info("Uploading and trimming the selected source video…")
             return
         st.session_state.pending_work=None
         try:
@@ -241,11 +248,21 @@ def pending_work():
             incident_id=record.get("id") if isinstance(record,dict) else None
             if not incident_id or not re.fullmatch(r"[0-9a-f]{32}",incident_id):
                 raise RuntimeError("Upload did not return a valid case ID.")
+            kind=st.session_state.pop("pending_kind","upload")
+            if kind in ("vision_only","rerun"):
+                st.session_state.active_case_id=incident_id
+                visual=record.get("vision_status")
+                if kind=="vision_only" and visual!="completed":
+                    st.session_state.last_result=("vision_failed",record.get("note",
+                        "The remote free visual provider could not analyze this clip."))
+                else:
+                    st.session_state.last_result=("vision_success" if kind=="vision_only"
+                                                  else "success",record)
+                st.rerun()
             if incident_id not in st.session_state.te_case_ids:
                 st.session_state.te_case_ids.append(incident_id)
             st.session_state.active_case_id=incident_id
-            # The API saved the video but deferred processing. Execute it
-            # independently so the UI can inspect live SQLite stage updates.
+            # Initial upload is deferred; run local analysis once and poll the DB.
             st.session_state.processing_case_id=incident_id
             st.session_state.processing_future=jobs().submit(process_case,incident_id)
             st.rerun()
@@ -320,6 +337,11 @@ if last_result:
         st.success("Analysis finished — results shown on this page below.")
     elif last_result[0] == "render_success":
         st.success("Full-length annotated video ready below.")
+    elif last_result[0] == "vision_success":
+        st.success("Visual reasoning updated using the saved clip; YOLO and video "
+                   "were not reprocessed.")
+    elif last_result[0] == "vision_failed":
+        st.warning("The visual provider is still unavailable: " + str(last_result[1])[:260])
     else:
         st.error("Analysis failed: " + str(last_result[1]))
 
@@ -495,11 +517,43 @@ def render_case_detail(selected):
         st.markdown("#### AI processing stages")
         stage_status(st,"Vehicle tracking",a.get("object_tracking"))
         stage_status(st,"Driver speech",a.get("transcription"))
-        stage_status(st,"Qwen vision reasoning",a.get("visual_reasoning"))
-        stage_status(st,"Egyptian plate OCR",a.get("plate_recognition"))
+        vision_state=a.get("visual_reasoning") or {}
+        stage_status(st,"Visual scene reasoning",vision_state)
+        if vision_state.get("status")=="completed":
+            st.caption("Actual model: " + str(vision_state.get("model") or "unknown")[:100])
+            if vision_state.get("routing")=="OpenRouter free multimodal router":
+                st.caption("Free auto-router selected the actual model shown above. "
+                           "It may not be Qwen.")
+        elif vision_state.get("status")=="failed":
+            st.caption("404 can mean an unavailable model or an account/provider "
+                       "routing restriction. The no-cost fallback is automatic on "
+                       "new requests; old failures need visual-only retry.")
+        plates_stage=a.get("plate_recognition") or {}
+        if plates_stage.get("status")=="completed":
+            if plates_stage.get("candidates"):
+                st.warning("Plate detector ran; OCR candidates need human verification. "
+                           "No registration number is confirmed.")
+            else:
+                st.info("Plate detection completed, but no reliable Egyptian plate "
+                        "characters were recovered. Do not assume a readable plate.")
+        else:
+            stage_status(st,"Plate detection and tentative Arabic OCR",plates_stage)
         stage_status(st,"Potential violation review",a.get("violation_assessment"))
+        if selected["status"]=="ready":
+            if st.button("Retry visual AI only · keep YOLO and full video",
+                         key="retry_visual_only",use_container_width=True,
+                         disabled=st.session_state.get("pending_work") is not None):
+                if reserve_demo_analysis():
+                    st.session_state.pending_kind="vision_only"
+                    st.session_state.pending_work=jobs().submit(
+                        lambda: api_request("POST",
+                            f"/incidents/{selected_id}/retry-vision",
+                            timeout=240).json())
+                    st.rerun()
+                else:
+                    st.warning("The public demo processing limit was reached.")
         if selected["status"] in ("ready","failed"):
-            if st.button("Re-run AI analysis on this clip",use_container_width=True):
+            if st.button("Re-run all stages (slower)",use_container_width=True):
                 if reserve_demo_analysis():
                     st.session_state.pending_kind = "rerun"
                     st.session_state.pending_work=jobs().submit(
@@ -755,6 +809,18 @@ elif area=="System health":
         with st.container(border=True):
             st.markdown(f"**{title}**")
             st.caption("Configured" if cap.get("configured") else "Not configured on Streamlit Community Cloud")
+    st.markdown("#### Free visual model availability (no footage sent)")
+    if st.button("Check free Qwen models currently listed on OpenRouter",
+                 use_container_width=True):
+        from services.api.vision_routing import fetch_free_qwen_options
+        options=fetch_free_qwen_options()
+        if options:
+            st.success("Free image-capable Qwen models in the public catalog: " +
+                       ", ".join(options))
+        else:
+            st.warning("No free Qwen image model found or public catalog unavailable. "
+                       "The app can try OpenRouter's image-capable free router when "
+                       "a Qwen request returns 404.")
     st.warning("Configured means enabled, not validated. The CPU ONNX detectors download "
                "public weights on first analysis and may run slowly on free Cloud. "
                "OCR is tentative. OpenRouter and Groq still require valid secrets.")
