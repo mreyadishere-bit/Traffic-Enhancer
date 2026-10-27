@@ -397,11 +397,17 @@ def render_case_detail(selected):
                              attempted=selected_id in attempts,
                              last_status=(session_exports.get(selected_id) or {}).get("status"))
         if status=="auto_rebuild" and st.session_state.get("processing_case_id") is None:
-            attempts.add(selected_id)
-            st.session_state.pending_render_case_id=selected_id
-            st.session_state.pending_render=jobs().submit(
-                prepare_full_video,selected_id,float(selected["duration"]))
-            status="rendering"
+            if st.session_state.get("pending_render") is None:
+                attempts.add(selected_id)
+                st.session_state.pending_render_case_id=selected_id
+                st.session_state.pending_render=jobs().submit(
+                    prepare_full_video,selected_id,float(selected["duration"]))
+                status="rendering"
+            else:
+                status="waiting_other_job"
+        if status=="waiting_other_job":
+            st.info("Another video is currently rendering on this free CPU instance. "
+                    "Open this case again when that job finishes.")
         if status=="source_missing":
             st.error("The original selected video is missing from this temporary "
                      "Cloud instance. The report metadata survived, but the MP4 "
@@ -417,8 +423,9 @@ def render_case_detail(selected):
                 st.error("Full-length video regeneration failed. " +
                          str(note or "The free CPU worker could not finish.")[:220])
             else:
-                st.warning("The MP4 is not present on this server. The previous "
-                           "render attempt has ended; no rendering job is running.")
+                st.warning("The MP4 is not present on this server. Its old report "
+                           "still says completed, but no render job is running. "
+                           "It may have disappeared when the free app restarted.")
             if st.button("Retry full-length overlay · keep saved analysis",
                          key="retry_overlay_"+selected_id[:10],use_container_width=True,
                          disabled=(st.session_state.get("pending_render") is not None)):
