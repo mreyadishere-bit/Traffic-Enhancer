@@ -1,0 +1,35 @@
+name: Verify public CPU model weights
+on:
+  pull_request:
+    paths:
+      - "services/api/cloud_vision.py"
+      - "requirements.txt"
+      - ".github/workflows/model-smoke.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-onnx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install lightweight CPU inference dependencies
+        run: |
+          python -m pip install "onnxruntime>=1.20,<2" "numpy>=1.26,<3" "pillow>=10" "httpx>=0.27,<1"
+      - name: Load actual public models and process a neutral image
+        run: |
+          python - <<'PY'
+          from PIL import Image
+          from services.api.cloud_vision import _onnx_session, predict_frame
+          image = Image.new("RGB", (320, 180), "#cccccc")
+          for model in ("vehicle", "plate"):
+              session = _onnx_session(model)
+              print(model,session.get_inputs()[0].shape,session.get_outputs()[0].shape)
+              predictions = predict_frame(model, image)
+              assert isinstance(predictions, list)
+              print("Prediction path OK:",model)
+          PY
