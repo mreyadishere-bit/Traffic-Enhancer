@@ -17,14 +17,14 @@ from PIL import Image
 
 # Public upstream model assets and license notes:
 # Vehicle: unileon-robotics/YOLO8-ONNX (Ultralytics YOLOv8n, AGPL-3.0)
-# Egyptian plate: omasayeddd/egyptian-license-plate-detector (model card MIT;
-# review upstream YOLO/Ultralytics licensing before commercial deployment).
+# Plate detector: ishaqinu/yolo26n-license-plate-detection (AGPL-3.0).
+# Generic plate-localization model; Egyptian-specific accuracy is unverified.
 VEHICLE_SOURCE = (
     "https://huggingface.co/unileon-robotics/YOLO8-ONNX/resolve/main/yolov8n.onnx"
 )
 VEHICLE_SHA256 = "fa2c856b0effedce4f49fffd121f438247a64c8f633bf0e6d5e5960e869ccc5a"
 PLATE_SOURCE = (
-    "https://huggingface.co/omasayeddd/egyptian-license-plate-detector/resolve/main/best.onnx"
+    "https://huggingface.co/ishaqinu/yolo26n-license-plate-detection/resolve/main/alpr_26n.onnx"
 )
 LABELS = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 FRAME_SIZE = 640
@@ -83,7 +83,7 @@ def _onnx_session(kind: str):
         model_file = _download_model(VEHICLE_SOURCE, _models_dir() / "vehicle-yolov8n.onnx",
                                      VEHICLE_SHA256)
     elif kind == "plate":
-        model_file = _download_model(PLATE_SOURCE, _models_dir() / "egyptian-plate-v8n.onnx")
+        model_file = _download_model(PLATE_SOURCE, _models_dir() / "plate-yolo26n.onnx")
     else:
         raise ValueError("Unsupported inference model")
     options = ort.SessionOptions()
@@ -285,7 +285,7 @@ def _ocr_plate(crop: Image.Image):
 
 
 def sample_egyptian_plates(video: Path, duration: float) -> dict:
-    """Egypt-trained YOLOv8n ONNX plate locator + tentative Arabic OCR."""
+    """Pretrained generic YOLO26n plate locator + tentative Arabic/Egyptian OCR."""
     try:
         count = min(8,max(2,int(os.getenv("TE_CLOUD_PLATE_FRAMES","5"))))
         candidates=[]
@@ -314,14 +314,14 @@ def sample_egyptian_plates(video: Path, duration: float) -> dict:
                     "requires_human_review":True
                 })
         candidates.sort(key=lambda x:-x["confidence"])
-        return {"status":"completed","model":"Egyptian YOLOv8n plate ONNX + Tesseract ara/eng",
+        return {"status":"completed","model":"YOLO26n plate ONNX + Tesseract Arabic/English",
                 "value":None,"candidates":candidates[:18],
                 "plates_detected":detected,
                 "sampled_frames":processed,
-                "note":"Real Egypt-trained plate detection; OCR readings are uncertain, not "
+                "note":"Real pretrained plate detection (not Egypt-specific); OCR readings are uncertain, not "
                        "verified. No text is inferred when pixels are too small or blurry. "
                        "Only a human reviewer may confirm any reading."}
     except Exception as exc:
-        return {"status":"failed","model":"Egyptian YOLOv8n ONNX + Tesseract",
+        return {"status":"failed","model":"YOLO26n plate ONNX + Tesseract",
                 "value":None,"candidates":[],
                 "note":f"{type(exc).__name__}: {str(exc)[:190]}"}

@@ -8,9 +8,11 @@ paid API is needed for the **vehicle detector or plate detector**.
 1. Vehicle detection: pretrained YOLOv8n COCO ONNX, CPU via onnxruntime.
    Public model: https://huggingface.co/unileon-robotics/YOLO8-ONNX
    Classes included: car, truck, bus, motorcycle.
-2. Egyptian plate detection: custom YOLOv8n ONNX trained for Egyptian license
-   plates (model card reports validation figures; not independently reproduced).
-   Public model: https://huggingface.co/omasayeddd/egyptian-license-plate-detector
+2. Plate detection: YOLO26n ONNX generic single-class plate locator.
+   Public model: https://huggingface.co/ishaqinu/yolo26n-license-plate-detection
+   **NOT Egypt-specialized:** a previously considered Egypt-trained model
+   documented best.onnx, but did NOT publish the ONNX file (HTTP 404).
+   Real Egyptian plates may be missed; do not claim Egyptian validation.
 3. OCR: Debian Tesseract Arabic + English on *actual detected plate crops*.
    It can return no characters when blurred or tiny. Text is a **candidate**,
    never automatically the verified license plate.
@@ -49,9 +51,8 @@ Windows Ultralytics + BoT-SORT and EasyOCR pipeline remains unchanged.
   road recordings without authorization. Files are not secure permanent
   evidence storage and processing limits can be exhausted anonymously.
 - Model licenses must be reviewed before redistribution/commercial use:
-  YOLOv8 from Ultralytics is AGPL-3.0, while the Egyptian plate model's
-  repository declares MIT. The underlying architectures and weights may
-  have separate obligations.
+  YOLOv8 from Ultralytics is AGPL-3.0, and the generic YOLO26n plate model is also AGPL-3.0. Review obligations
+  before any commercial use.
 - Test coverage verifies model decoding and integration logic with synthetic
   tensors and unit fixtures, NOT field accuracy; evaluate on representative
   consented Egyptian footage before real deployment.

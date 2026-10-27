@@ -432,8 +432,9 @@ elif area == "New analysis":
                         st.rerun()
                     else:
                         st.warning("Public demo processing limit reached. Try later or use the local app.")
-                st.caption("CPU YOLO detects sampled vehicles and an Egyptian-trained "
-                       "plate locator feeds tentative Arabic OCR. First run may "
+                st.caption("CPU YOLO detects sampled vehicles and a pretrained generic "
+                       "plate locator feeds tentative Arabic OCR. Egyptian-specific "
+                       "performance is not validated. First run may "
                        "download public ONNX weights. Qwen/Whisper use separate API keys.")
 
 elif area in ("Evidence studio","Incident library"):
@@ -496,7 +497,7 @@ elif area in ("Evidence studio","Incident library"):
             st.caption(f"{len(tracks)} provisional track IDs. Sparse IoU associations "
                        "are not verified vehicle identities and are NOT BoT-SORT.")
             plates = a.get("plate_recognition") or {}
-            st.markdown("#### Egyptian license-plate OCR candidates")
+            st.markdown("#### Arabic license-plate OCR candidates (Egypt format requires review)")
             st.caption(f"Detected plate regions: {plates.get('plates_detected',0)} · "
                        "No OCR reading is automatically confirmed.")
             if plates.get("candidates"):
