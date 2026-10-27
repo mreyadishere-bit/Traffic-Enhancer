@@ -97,11 +97,12 @@ def _onnx_session(kind: str):
 def _letterbox(frame: Image.Image, size=FRAME_SIZE):
     frame = frame.convert("RGB")
     width, height = frame.size
-    scale = min(size / width, size / height)
+    target_w,target_h = (size,size) if isinstance(size,int) else size
+    scale = min(target_w / width, target_h / height)
     new_width = max(1, round(width * scale))
     new_height = max(1, round(height * scale))
-    offset_x, offset_y = (size-new_width)//2, (size-new_height)//2
-    canvas = Image.new("RGB", (size, size), (114,114,114))
+    offset_x, offset_y = (target_w-new_width)//2, (target_h-new_height)//2
+    canvas = Image.new("RGB", (target_w, target_h), (114,114,114))
     canvas.paste(frame.resize((new_width,new_height), Image.Resampling.BILINEAR),
                  (offset_x,offset_y))
     tensor = np.asarray(canvas, dtype=np.float32).transpose(2,0,1)[None] / 255.
@@ -169,10 +170,14 @@ def predict_frame(kind: str, image: Image.Image):
     model = _onnx_session(kind)
     inp = model.get_inputs()[0]
     dims = inp.shape
-    # Models selected for this pipeline use 640 × 640 float32 NCHW.
-    if len(dims) != 4 or (isinstance(dims[2],int) and dims[2] != FRAME_SIZE):
-        raise ValueError("Unexpected ONNX input shape (expected 640x640)")
-    tensor,transform = _letterbox(image)
+    # Legitimate ONNX exports can use 480×640 (COCO detector) or 640×640.
+    if len(dims) != 4:
+        raise ValueError("ONNX input must be NCHW")
+    h = int(dims[2]) if isinstance(dims[2],int) else FRAME_SIZE
+    w = int(dims[3]) if isinstance(dims[3],int) else FRAME_SIZE
+    if not (256 <= h <= 1280 and 256 <= w <= 1280):
+        raise ValueError("ONNX model input dimensions outside supported range")
+    tensor,transform = _letterbox(image, (w,h))
     raw = model.run(None,{inp.name:tensor})[0]
     return _decode_yolo(raw,transform,LABELS if kind=="vehicle" else {0:"egyptian_plate"},
                         threshold=.28 if kind=="vehicle" else .32,
