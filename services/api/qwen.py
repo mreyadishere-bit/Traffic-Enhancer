@@ -232,8 +232,10 @@ def _describe_via_remote(original: Path, duration: float, claim: dict,
         actual_served = result.get("model") or actual_model
         return {"status": "completed", "model": actual_served,
                 "requested_model": model_id,
-                "routing": "OpenRouter free multimodal router" if
-                           actual_model == "openrouter/free" else "requested/free Qwen",
+                "routing": ("OpenRouter free multimodal router" if
+                            actual_model == "openrouter/free" else
+                            "requested/free Qwen" if actual_model.startswith("qwen/") else
+                            "catalog-verified free vision alternative"),
                 "attempted_models": tried,
                 "backend": "operator_configured_remote",
                 "observations": parsed, "sampled_seconds": [s for s, _ in frames],
