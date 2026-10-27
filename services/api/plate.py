@@ -10,6 +10,10 @@ from pathlib import Path
 
 
 def scan_plates(video: Path, duration: float) -> dict:
+    # Egypt-trained plate localization + Arabic OCR, no uploaded custom weights.
+    if os.getenv("TE_CLOUD_VISION", "0") == "1":
+        from .cloud_vision import sample_egyptian_plates
+        return sample_egyptian_plates(video, duration)
     weights = os.getenv("TE_PLATE_MODEL", "").strip()
     if not weights:
         return {"status": "not_configured", "value": None, "candidates": [],
