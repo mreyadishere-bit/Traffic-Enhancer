@@ -460,24 +460,32 @@ elif area in ("Evidence studio","Incident library"):
             st.error(selected["error"])
         first,inspector=st.columns([1.6,1],gap="large")
         with first:
-            st.markdown("#### Real recorded footage")
-            try:
-                media=backend.evidence_path(backend.read_incident(selected_id))
-                if media.is_file():
-                    st.video(str(media))
-                else:
-                    st.warning("The selected media is no longer on this temporary Cloud instance.")
-            except Exception as exc:
-                st.warning("Video unavailable: "+str(exc)[:180])
-            thumb=backend.DERIVED/(selected_id+".jpg")
-            if thumb.is_file():
-                st.markdown("**Original unannotated evidence frame**")
-                st.image(str(thumb),caption="Actual source frame — not proof of a violation.",use_container_width=True)
-            st.markdown("#### Annotated evidence viewer")
+            st.markdown("### Annotated evidence viewer")
+            st.caption("Bounding boxes are from real sampled source frames, not "
+                       "fictional continuous tracking.")
+            # Recover the annotated media from existing saved YOLO results;
+            # this NEVER calls OpenRouter/Groq or re-runs neural inference.
+            saved_detections=(a.get("vehicle_detection") or {}).get("detections") or []
+            cached_movie=backend.DERIVED/(selected_id+".samples.mp4")
+            if not cached_movie.is_file() and saved_detections:
+                if st.button("Generate boxes from saved detections · no API usage",
+                             key="offline_annotations",use_container_width=True):
+                    from services.api.visual_evidence import render_sampled_evidence
+                    with st.spinner("Drawing boxes on actual source timestamps…"):
+                        result=render_sampled_evidence(
+                            backend.evidence_path(backend.read_incident(selected_id)),
+                            backend.DERIVED,selected_id,
+                            {"detections": saved_detections,
+                             "tracks": (a.get("object_tracking") or {}).get("tracks",[])},
+                            a.get("plate_recognition") or {})
+                        if result["status"]!="completed":
+                            st.warning(result.get("note","Could not create montage"))
+                        else:
+                            st.rerun()
             viz=a.get("annotated_evidence") or {}
             preview_image=backend.DERIVED/(selected_id+".annotated.jpg")
             preview_movie=backend.DERIVED/(selected_id+".samples.mp4")
-            if preview_movie.is_file() and viz.get("status")=="completed":
+            if preview_movie.is_file():
                 st.video(preview_movie.read_bytes(),format="video/mp4")
                 st.caption("Sampled-frame review montage: each image is a REAL "
                            "timestamped YOLO observation held for 1 second. "
@@ -494,7 +502,9 @@ elif area in ("Evidence studio","Incident library"):
                         "Press Re-run AI analysis to produce annotated media.")
             if viz.get("note"):
                 st.caption(viz["note"])
-            moves=viz.get("motion_metrics") or []
+            from services.api.visual_evidence import provisional_pixel_motion
+            moves=viz.get("motion_metrics") or provisional_pixel_motion(
+                (a.get("object_tracking") or {}).get("tracks") or [])
             st.markdown("#### Motion measurements · image-plane only")
             if moves:
                 st.dataframe(
@@ -516,6 +526,19 @@ elif area in ("Evidence studio","Incident library"):
             st.info("Real-world speed and distance require a calibrated stationary "
                     "camera, known ground-plane geometry and reliable track IDs. "
                     "Uncalibrated px/s is NOT km/h; do not use it as evidence of speeding.")
+            with st.expander("View the unaltered original video and source frame"):
+                try:
+                    media=backend.evidence_path(backend.read_incident(selected_id))
+                    if media.is_file():
+                        st.video(str(media))
+                    else:
+                        st.warning("Original is no longer on this temporary Cloud instance.")
+                except Exception as exc:
+                    st.warning("Original unavailable: "+str(exc)[:180])
+                thumb=backend.DERIVED/(selected_id+".jpg")
+                if thumb.is_file():
+                    st.image(str(thumb),caption="Unannotated original source frame",
+                             use_container_width=True)
             st.markdown("#### Relevant model observations")
             observation=(a.get("visual_reasoning") or {}).get("observations") or {}
             st.write(observation.get("scene_summary") or "No visual scene interpretation is available.")
