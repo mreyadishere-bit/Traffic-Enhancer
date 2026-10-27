@@ -88,21 +88,28 @@ def fetch_free_qwen_options(get=None) -> list[str]:
 
 
 class RoutingFailure(Exception):
-    def __init__(self, status_code: int, tried: list[str]):
+    def __init__(self, status_code: int, tried: list[str], reason: str = "unavailable"):
         self.status_code=status_code
         self.tried=tried
-        super().__init__(f"OpenRouter HTTP {status_code} after available free visual models were tried.")
+        self.reason=reason
+        super().__init__(f"Free visual model routing failed: HTTP {status_code} ({reason}).")
 
 
 def request_free_vision(endpoint: str, headers: dict, content: list,
-                        model: str, *, post=None, get=None):
-    """Bounded fallback: max 1 preferred + 1 free image alternate + free router."""
+                        model: str, *, post=None, get=None, inspect=None):
+    """At most three FREE calls; retry 404 or empty 200 model responses only.
+
+    An optional inspect(response) yields a sanitized {"status":"ok|retry|stop",
+    "reason":"..."}; never retry on 401/402/403/429 or provider-declared error.
+    """
     if post is None:
         post=httpx.post
     if not no_cost_model(model):
         raise ValueError("A non-free OpenRouter model is blocked in this free demo.")
     queue=[model]
     tried=[]
+    last_reason="unavailable"
+    last_code=404
     while queue and len(tried)<3:
         current=queue.pop(0)
         if current in tried:
@@ -110,27 +117,32 @@ def request_free_vision(endpoint: str, headers: dict, content: list,
         tried.append(current)
         response=post(endpoint,headers=headers,
                       json={"model":current,"messages":[{"role":"user","content":content}],
-                            "max_tokens":450,"temperature":0},
+                            "max_tokens":900,"temperature":0},
                       timeout=httpx.Timeout(75,connect=8,read=70,write=30))
         code=getattr(response,"status_code",200)
-        if code==404:
-            if current != FREE_ROUTER:
-                if len(tried)==1:
-                    # A 404 may mean Qwen was retired or this account has no
-                    # allowed Qwen provider. Prefer another *catalog-verified*
-                    # free image model; then try OpenRouter's free router.
-                    options=fetch_free_vision_options(get=get)
-                    alternate=next((slug for slug in options
-                                    if slug not in tried and slug!=FREE_ROUTER),None)
-                    if alternate:
-                        queue.append(alternate)
-                if FREE_ROUTER not in queue and FREE_ROUTER not in tried:
-                    queue.append(FREE_ROUTER)
-            continue
-        if code>=400:
-            # Unauthorized, insufficient credit, forbidden and rate limits do
-            # not trigger another request. This prevents unnecessary retries.
+        if code not in (200,404):
+            # Do not bypass authorization, credits, provider refusals or limits.
             response.raise_for_status()
-        response.raise_for_status()
-        return response,current,tried
-    raise RoutingFailure(404,tried)
+        if code==200:
+            response.raise_for_status()
+            verdict=inspect(response) if inspect is not None else {"status":"ok"}
+            status=verdict.get("status","stop") if isinstance(verdict,dict) else "stop"
+            if status=="ok":
+                return response,current,tried
+            last_code=200
+            last_reason=str(verdict.get("reason","invalid_response"))[:70]
+            if status!="retry":
+                raise RoutingFailure(200,tried,last_reason)
+        else:
+            last_code=404
+            last_reason="no_compatible_provider"
+        if current != FREE_ROUTER:
+            if len(tried)==1:
+                options=fetch_free_vision_options(get=get)
+                alternate=next((slug for slug in options
+                                if slug not in tried and slug!=FREE_ROUTER),None)
+                if alternate:
+                    queue.append(alternate)
+            if FREE_ROUTER not in queue and FREE_ROUTER not in tried:
+                queue.append(FREE_ROUTER)
+    raise RoutingFailure(last_code,tried,last_reason)

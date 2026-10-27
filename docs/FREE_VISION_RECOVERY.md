@@ -47,3 +47,32 @@ at most three attempts (configured free model, one catalog alternate, free route
 If routing is still blocked, check the live synthetic-image key test in System
 Health, then review https://openrouter.ai/settings/privacy. Do not assume
 account settings can be changed automatically by Traffic Enhancer.
+
+
+## HTTP 200 but no actual model answer (October 27, 2026)
+
+Some OpenRouter multimodal free-model requests return HTTP 200 but
+`choices[0].message.content` is absent, null, or a list of content blocks.
+Older builds raised a generic `ValueError: model request failed`. The new
+normalizer handles text-block arrays and classifies empty completion,
+reasoning-only output, exhausted output tokens, model refusal, embedded provider
+errors, and invalid JSON separately **without exposing provider response bodies
+or credentials**.
+
+The optional OpenRouter routing logic retries an *empty* HTTP 200 final answer
+using only a catalog-verified zero-cost vision model or the free router, with at
+most three model calls and no retries on HTTP 401/402/403/429 or an embedded
+provider-declared error. It raises the output budget from 450 to 900 tokens.
+Extra free inference requests can consume the account's rate-limited quota.
+Even successful model text must parse as the expected scene JSON, otherwise
+the outcome is marked unparseable, not as a verified violation.
+
+Run **System health → Test my API key with a generated image** to verify the
+key accepts image inference with actual text output. For existing saved videos,
+choose **Evidence studio → Retry visual AI only · keep YOLO and full video**.
+Do not rerun all stages unless the original YOLO artifacts themselves failed.
+A free-provider/account routing issue can still prevent remote AI entirely.
+
+Plate OCR remains tentative: the small night-time plate regions in source
+footage cannot reliably be turned into exact Egyptian registration characters
+without sufficient actual image resolution. Never invent characters.
