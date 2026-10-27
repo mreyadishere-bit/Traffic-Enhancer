@@ -575,17 +575,11 @@ def render_case_detail(selected):
             st.caption("404 can mean an unavailable model or an account/provider "
                        "routing restriction. The no-cost fallback is automatic on "
                        "new requests; old failures need visual-only retry.")
-        plates_stage=a.get("plate_recognition") or {}
-        if plates_stage.get("status")=="completed":
-            if plates_stage.get("candidates"):
-                st.warning("Plate detector ran; OCR candidates need human verification. "
-                           "No registration number is confirmed.")
-            else:
-                st.info("Plate detection completed, but no reliable Egyptian plate "
-                        "characters were recovered. Do not assume a readable plate.")
-        else:
-            stage_status(st,"Plate detection and tentative Arabic OCR",plates_stage)
-        stage_status(st,"Potential violation review",a.get("violation_assessment"))
+        if vision_state.get("status") in ("failed","unparseable"):
+            st.info("This is the last SAVED visual result, not a live request. "
+                    "HTTP 404 may mean that OpenRouter cannot route to a provider "
+                    "allowed by your account's privacy settings. Retry visual AI "
+                    "here without repeating the YOLO video analysis.")
         if selected["status"]=="ready":
             if st.button("Retry visual AI only · keep YOLO and full video",
                          key="retry_visual_only",use_container_width=True,
@@ -599,6 +593,17 @@ def render_case_detail(selected):
                     st.rerun()
                 else:
                     st.warning("The public demo processing limit was reached.")
+        plates_stage=a.get("plate_recognition") or {}
+        if plates_stage.get("status")=="completed":
+            if plates_stage.get("candidates"):
+                st.warning("Plate detector ran; OCR candidates need human verification. "
+                           "No registration number is confirmed.")
+            else:
+                st.info("Plate detection completed, but no reliable Egyptian plate "
+                        "characters were recovered. Do not assume a readable plate.")
+        else:
+            stage_status(st,"Plate detection and tentative Arabic OCR",plates_stage)
+        stage_status(st,"Potential violation review",a.get("violation_assessment"))
         if selected["status"] in ("ready","failed"):
             if st.button("Re-run all stages (slower)",use_container_width=True):
                 if reserve_demo_analysis():
@@ -868,6 +873,10 @@ elif area=="System health":
             st.warning("No free Qwen image model found or public catalog unavailable. "
                        "The app can try OpenRouter's image-capable free router when "
                        "a Qwen request returns 404.")
+    st.caption("A 404 error may be caused by a retired model, a provider blocked "
+               "by OpenRouter account privacy settings, or no free image-capable "
+               "provider available for your key. A public model listing cannot "
+               "confirm access for your specific key.")
     st.warning("Configured means enabled, not validated. The CPU ONNX detectors download "
                "public weights on first analysis and may run slowly on free Cloud. "
                "OCR is tentative. OpenRouter and Groq still require valid secrets.")
