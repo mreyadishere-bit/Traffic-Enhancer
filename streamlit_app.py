@@ -186,18 +186,21 @@ def date_label(raw):
     except (ValueError, TypeError):
         return "Unknown"
 
-def upload_and_analyze(blob: bytes, name: str, start: float, end: float, untrimmed: bool):
+def upload_and_analyze(source_path: str, name: str, start: float, end: float, untrimmed: bool):
     form = {"defer_processing": "true"}
     if not untrimmed:
         form.update({"start_seconds": str(start), "end_seconds": str(end)})
     suffix = Path(name).suffix.lower()
     kind = {".mp4": "video/mp4", ".mov": "video/quicktime",
             ".mkv": "video/x-matroska"}[suffix]
-    result = api_request(
-        "POST", "/incidents", data=form,
-        files={"video": (Path(name).name, blob, kind)},
-        timeout=360,
-    )
+    # TestClient accepts a file object and streams its contents into the API.
+    # Avoid allocating another 33–70 MB bytes object when starting analysis.
+    with Path(source_path).open("rb") as source:
+        result = api_request(
+            "POST", "/incidents", data=form,
+            files={"video": (Path(name).name, source, kind)},
+            timeout=360,
+        )
     return result.json()
 
 @st.cache_resource
@@ -652,33 +655,58 @@ elif area == "New analysis":
     st.markdown('<div class="kicker">01 / EVIDENCE INTAKE</div>', unsafe_allow_html=True)
     st.header("Bring in your recording.")
     st.caption("Upload a real MP4, MOV or MKV file (up to 70 MB). Select a segment before analysis, or use the full video.")
+    if "upload_widget_generation" not in st.session_state:
+        st.session_state.upload_widget_generation=0
     incoming = st.file_uploader(
         "01 · Choose dashcam footage", type=["mp4", "mov", "mkv"],
-        accept_multiple_files=False, key="source_uploader",
+        accept_multiple_files=False,
+        key=f"source_uploader_{st.session_state.upload_widget_generation}",
     )
+    if st.button("Reset stuck upload / choose a file again",key="retry_stuck_upload"):
+        st.session_state.upload_widget_generation+=1
+        st.session_state.video_signature=None
+        st.session_state.video_metadata=None
+        st.session_state.video_error=None
+        st.session_state.upload_source_path=None
+        st.rerun()
+    st.caption("If the file spinner keeps turning for over a minute, use Reset above. "
+               "An incomplete browser upload has not yet reached FFprobe or AI. "
+               "A fresh browser tab or Streamlit Cloud reboot may be needed if the "
+               "connection has stalled.")
     st.markdown("### 02 · Optional clip trimming")
     st.caption("The timeline, exact start/end fields and video preview appear once the uploaded file has finished transferring and FFprobe has read its duration.")
     if incoming is None:
         st.info("Choose a video above. You can then trim any 1–180-second section, or analyze the whole file if it is up to 180 seconds long.")
     else:
-        blob = incoming.getvalue()
-        if len(blob) > 70 * 1024 * 1024:
-            st.error("The cloud demo accepts at most 70 MB per source. Please upload a smaller version.")
+        from services.api.upload_intake import fingerprint_upload, spool_uploaded_file
+        try:
+            signature=fingerprint_upload(incoming)
+        except ValueError as exc:
+            st.error(str(exc))
         else:
-            signature = (incoming.name, len(blob), hashlib.sha256(blob).hexdigest())
+            st.success(f"Browser upload received: {signature[0]} ({signature[1]/1048576:.1f} MiB).")
             if st.session_state.get("video_signature") != signature:
-                st.session_state.video_signature = signature
-                st.session_state.video_metadata = None
-                st.session_state.video_error = None
-                with st.spinner("Upload received. Inspecting video duration with FFprobe…"):
+                st.session_state.video_signature=signature
+                st.session_state.video_metadata=None
+                st.session_state.video_error=None
+                st.session_state.upload_source_path=None
+                with st.spinner("Saving the received clip and reading its duration with FFprobe…"):
+                    temp_dir=tempfile.TemporaryDirectory(prefix="traffic-upload-")
                     try:
-                        with tempfile.TemporaryDirectory() as temp:
-                            source = Path(temp) / Path(incoming.name).name
-                            source.write_bytes(blob)
-                            backend.ensure_media_tools()
-                            st.session_state.video_metadata = backend.probe(source)
+                        source=spool_uploaded_file(incoming, Path(temp_dir.name), signature)
+                        backend.ensure_media_tools()
+                        metadata=backend.probe(source)
+                        st.session_state.video_metadata=metadata
+                        st.session_state.upload_source_path=str(source)
+                        # Preserve this source while a background analysis may
+                        # still be reading it; cleanup occurs on session disposal.
+                        st.session_state.setdefault("upload_tempdirs",[]).append(temp_dir)
                     except Exception as exc:
-                        st.session_state.video_error = str(exc)
+                        temp_dir.cleanup()
+                        st.session_state.video_error=(
+                            f"{type(exc).__name__}: video intake/metadata failed. "
+                            "Try a browser-compatible MP4 or reset and re-upload."
+                        )
             if st.session_state.get("video_error"):
                 st.error("Cannot read this recording: " + st.session_state.video_error)
                 st.caption("Try an MP4 encoded with H.264; do not start analysis until the source can be inspected.")
@@ -759,16 +787,16 @@ elif area == "New analysis":
                 left, right = st.columns([1.6, 1], gap="large")
                 with left:
                     st.markdown("#### 03 · Preview your selection")
-                    if incoming.name.lower().endswith(".mp4") and len(blob) < 50 * 1024 * 1024:
+                    if incoming.name.lower().endswith(".mp4") and signature[1] < 50 * 1024 * 1024:
                         if selection_error:
                             st.info("Enter valid start and end times to preview the selected segment.")
                         elif full:
-                            st.video(blob, format="video/mp4",
+                            st.video(st.session_state.upload_source_path, format="video/mp4",
                                      alt="Original dashcam recording")
                         else:
                             # Streamlit natively stops preview at the selection's
                             # end; no expensive server-side transcoding is needed.
-                            st.video(blob, format="video/mp4",
+                            st.video(st.session_state.upload_source_path, format="video/mp4",
                                      start_time=f"{start:.1f}s",
                                      end_time=f"{end:.1f}s",
                                      alt="Preview of exactly the selected segment")
@@ -802,7 +830,7 @@ elif area == "New analysis":
                     if reserve_demo_analysis():
                         st.session_state.pending_kind = "upload"
                         st.session_state.pending_work = jobs().submit(
-                            upload_and_analyze, blob, incoming.name,
+                            upload_and_analyze, st.session_state.upload_source_path, incoming.name,
                             start, end, full
                         )
                         st.rerun()
