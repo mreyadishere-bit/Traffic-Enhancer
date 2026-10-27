@@ -297,6 +297,7 @@ async def upload_incident(
     background: BackgroundTasks, video: UploadFile = File(...),
     start_seconds: float | None = Form(default=None),
     end_seconds: float | None = Form(default=None),
+    defer_processing: bool = Form(default=False),
 ):
     ensure_media_tools()
     filename = Path(video.filename or "recording.mp4").name[:160]
@@ -372,7 +373,8 @@ async def upload_incident(
         raise
     finally:
         await video.close()
-    background.add_task(analyze_record, incident_id)
+    if not defer_processing:
+        background.add_task(analyze_record, incident_id)
     return {"id": incident_id, "status": "queued",
             "sha256": source_digest.hexdigest(),
             "clip_sha256": clip_digest, "trimmed": trimmed}
