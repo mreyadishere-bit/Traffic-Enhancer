@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .visual_evidence import render_sampled_evidence
 from .intent import parse_driver_claim
 from .tracker import track_vehicles
 from .qwen import describe_video
@@ -134,6 +135,9 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
     qwen = describe_video(original, duration, claim)
     progress('reading_plates')
     plates = scan_plates(original, duration)
+    progress('rendering_annotated_evidence')
+    visual_evidence = render_sampled_evidence(
+        original, preview.parent, preview.stem, tracking, plates)
     progress('reconciling_evidence')
     target = match_target(claim, tracking)
     assessment = assess_potential_events(claim, qwen)
@@ -161,6 +165,7 @@ def inspect_video(original: Path, preview: Path, metadata: dict, on_stage=None) 
             "note": tracking.get("note"),
         },
         "visual_reasoning": qwen,
+        "annotated_evidence": visual_evidence,
         "target_matching": target,
         "plate_recognition": plates,
         "violation_assessment": assessment,
